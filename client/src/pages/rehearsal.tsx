@@ -16,6 +16,7 @@ import {
 } from '@/lib/openai';
 import { computeWordDiff, calculateAccuracy } from '@/lib/word-diff';
 import { buildTranscriptionPrompt, getSpeakableText, normalizeScript } from '@/lib/script-utils';
+import { buildRehearsalLines, needsRehearsalLineInitialization } from '@/lib/rehearsal-flow';
 import type { RawScript, RehearsalLine, RehearsalState, Script } from '@/lib/types';
 import {
   appendDebugLogEntry,
@@ -115,6 +116,7 @@ export default function RehearsalPage() {
 
   const rehearsalLinesRef = useRef<RehearsalLine[]>([]);
   const currentLineIndexRef = useRef(-1);
+  const isStartingRef = useRef(false);
 
   useEffect(() => {
     rehearsalLinesRef.current = rehearsalLines;
@@ -184,13 +186,7 @@ export default function RehearsalPage() {
 
   useEffect(() => {
     if (script && selectedCharacter) {
-      const lines: RehearsalLine[] = script.lines.map((line, index) => ({
-        index,
-        character: line.character,
-        text: line.text,
-        isUserLine: line.character === selectedCharacter,
-        state: 'pending',
-      }));
+      const lines = buildRehearsalLines(script, selectedCharacter);
       setRehearsalLines(lines);
       setCurrentLineIndex(-1);
       setHasStarted(false);
@@ -358,6 +354,10 @@ export default function RehearsalPage() {
   }, [addDebugLog, toast]);
 
   const handleStart = useCallback(async () => {
+    if (isStartingRef.current) {
+      return;
+    }
+
     if (!hasApiKey) {
       toast({
         variant: 'destructive',
@@ -374,14 +374,34 @@ export default function RehearsalPage() {
       });
       return;
     }
+    if (!script) {
+      toast({
+        variant: 'destructive',
+        title: 'Script Not Ready',
+        description: 'Please wait for the script to finish loading',
+      });
+      return;
+    }
 
-    addDebugLog('Session Started', `Character: ${selectedCharacter}`);
-    await primeAudioPlayback().catch(() => undefined);
-    setShowSetup(false);
-    setHasStarted(true);
-    setCurrentLineIndex(0);
-    void processLine(0);
-  }, [addDebugLog, hasApiKey, selectedCharacter, processLine, toast]);
+    isStartingRef.current = true;
+    try {
+      if (needsRehearsalLineInitialization(rehearsalLinesRef.current, script, selectedCharacter)) {
+        const initializedLines = buildRehearsalLines(script, selectedCharacter);
+        rehearsalLinesRef.current = initializedLines;
+        setRehearsalLines(initializedLines);
+        addDebugLog('Session Prep', 'Initialized rehearsal lines before starting');
+      }
+
+      addDebugLog('Session Started', `Character: ${selectedCharacter}`);
+      await primeAudioPlayback().catch(() => undefined);
+      setShowSetup(false);
+      setHasStarted(true);
+      setCurrentLineIndex(0);
+      void processLine(0);
+    } finally {
+      isStartingRef.current = false;
+    }
+  }, [addDebugLog, hasApiKey, processLine, rehearsalLinesRef, script, selectedCharacter, toast]);
 
   const handleStartRecording = useCallback(async () => {
     try {
@@ -516,13 +536,7 @@ export default function RehearsalPage() {
     setShowSetup(true);
     addDebugLog('Session Restarted');
     if (script && selectedCharacter) {
-      const lines: RehearsalLine[] = script.lines.map((line, index) => ({
-        index,
-        character: line.character,
-        text: line.text,
-        isUserLine: line.character === selectedCharacter,
-        state: 'pending',
-      }));
+      const lines = buildRehearsalLines(script, selectedCharacter);
       setRehearsalLines(lines);
       setCurrentLineIndex(-1);
       setHasStarted(false);
