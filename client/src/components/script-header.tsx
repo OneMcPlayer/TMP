@@ -25,30 +25,24 @@ export function ScriptHeader({
   return (
     <div className="p-4 border-b border-border bg-card/50">
       <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div className="flex items-center gap-3">
+        <div className="flex items-start gap-3 min-w-0">
           <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
             <Clapperboard className="w-5 h-5 text-primary" />
           </div>
-          <div>
-            <h1 className="text-xl font-serif font-semibold">{title}</h1>
-            <div className="flex items-center gap-2 mt-1">
+          <div className="min-w-0">
+            <h1 className="text-xl font-serif font-semibold break-words">{title}</h1>
+            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
               <FileText className="w-3.5 h-3.5 text-muted-foreground" />
               <span className="text-sm text-muted-foreground">
                 {totalLines} lines total
               </span>
               {author && (
-                <>
-                  <span className="text-muted-foreground">•</span>
-                  <span className="text-sm text-muted-foreground">{author}</span>
-                </>
+                <span className="text-sm text-muted-foreground">{author}</span>
               )}
               {userCharacter && (
-                <>
-                  <span className="text-muted-foreground">•</span>
-                  <Badge variant="secondary" className="text-xs">
-                    Playing as {userCharacter}
-                  </Badge>
-                </>
+                <Badge variant="secondary" className="text-xs">
+                  Playing as {userCharacter}
+                </Badge>
               )}
               {carMode && (
                 <Badge variant="outline" className="text-xs">
