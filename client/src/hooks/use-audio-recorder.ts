@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback } from 'react';
+import { calculateAudioLevel, isSilentAudioLevel } from '@/lib/silence-detection';
 
 interface UseAudioRecorderReturn {
   isRecording: boolean;
@@ -9,15 +10,40 @@ interface UseAudioRecorderReturn {
 
 interface UseAudioRecorderOptions {
   carMode?: boolean;
+  silenceTimeoutMs?: number;
+  onSilenceTimeout?: () => void;
 }
 
 export function useAudioRecorder(
   options: UseAudioRecorderOptions = {},
 ): UseAudioRecorderReturn {
+  const silenceTimeoutMs = options.silenceTimeoutMs ?? 5000;
   const [isRecording, setIsRecording] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const sourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const silenceRafRef = useRef<number | null>(null);
+  const silenceTriggeredRef = useRef(false);
+
+  const stopSilenceMonitor = useCallback(() => {
+    if (silenceRafRef.current !== null) {
+      cancelAnimationFrame(silenceRafRef.current);
+      silenceRafRef.current = null;
+    }
+
+    sourceNodeRef.current?.disconnect();
+    sourceNodeRef.current = null;
+    analyserRef.current?.disconnect();
+    analyserRef.current = null;
+
+    if (audioContextRef.current) {
+      void audioContextRef.current.close();
+      audioContextRef.current = null;
+    }
+  }, []);
 
   const startRecording = useCallback(async () => {
     try {
@@ -41,6 +67,49 @@ export function useAudioRecorder(
 
       const mediaRecorder = new MediaRecorder(stream, { mimeType });
       mediaRecorderRef.current = mediaRecorder;
+      silenceTriggeredRef.current = false;
+
+      if (options.carMode) {
+        const AudioContextCtor =
+          window.AudioContext ||
+          ((window as Window & typeof globalThis & { webkitAudioContext?: typeof AudioContext })
+            .webkitAudioContext);
+        const audioContext = new AudioContextCtor();
+        const analyser = audioContext.createAnalyser();
+        const sourceNode = audioContext.createMediaStreamSource(stream);
+
+        analyser.fftSize = 2048;
+        sourceNode.connect(analyser);
+
+        audioContextRef.current = audioContext;
+        analyserRef.current = analyser;
+        sourceNodeRef.current = sourceNode;
+
+        const pcmData = new Float32Array(analyser.fftSize);
+        let lastNonSilentAt = performance.now();
+
+        const monitorSilence = () => {
+          const currentAnalyser = analyserRef.current;
+          if (!currentAnalyser || silenceTriggeredRef.current) {
+            return;
+          }
+
+          currentAnalyser.getFloatTimeDomainData(pcmData);
+          const audioLevel = calculateAudioLevel(pcmData);
+
+          if (!isSilentAudioLevel(audioLevel)) {
+            lastNonSilentAt = performance.now();
+          } else if (performance.now() - lastNonSilentAt >= silenceTimeoutMs) {
+            silenceTriggeredRef.current = true;
+            options.onSilenceTimeout?.();
+            return;
+          }
+
+          silenceRafRef.current = requestAnimationFrame(monitorSilence);
+        };
+
+        silenceRafRef.current = requestAnimationFrame(monitorSilence);
+      }
 
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
@@ -68,19 +137,19 @@ export function useAudioRecorder(
 
       mediaRecorder.onstop = () => {
         const blob = new Blob(chunksRef.current, { type: mediaRecorder.mimeType });
-        
+        stopSilenceMonitor();
         mediaRecorder.stream.getTracks().forEach(track => track.stop());
-        
+
         setIsRecording(false);
         mediaRecorderRef.current = null;
         chunksRef.current = [];
-        
+
         resolve(blob);
       };
 
       mediaRecorder.stop();
     });
-  }, []);
+  }, [stopSilenceMonitor]);
 
   return {
     isRecording,

@@ -100,7 +100,14 @@ export default function RehearsalPage() {
   const { toast } = useToast();
   const initialPreferences = useRef<PracticePreferences>(loadPreferences());
   const [carMode, setCarMode] = useState(initialPreferences.current.carMode);
-  const { startRecording, stopRecording } = useAudioRecorder({ carMode });
+  const isStoppingRecordingRef = useRef(false);
+  const isAutoStartingRecordingRef = useRef(false);
+  const onSilenceTimeoutRef = useRef<(() => void) | null>(null);
+  const { startRecording, stopRecording, isRecording } = useAudioRecorder({
+    carMode,
+    silenceTimeoutMs: 5000,
+    onSilenceTimeout: () => onSilenceTimeoutRef.current?.(),
+  });
 
   const [script, setScript] = useState<Script | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -453,6 +460,10 @@ export default function RehearsalPage() {
   }, [addDebugLog, startRecording, toast]);
 
   const handleStopRecording = useCallback(async () => {
+    if (isStoppingRecordingRef.current) {
+      return;
+    }
+    isStoppingRecordingRef.current = true;
     setRehearsalState('processing');
     addDebugLog('Recording Stopped', 'Processing user audio');
     
@@ -507,6 +518,8 @@ export default function RehearsalPage() {
         description: err instanceof Error ? err.message : 'Failed to transcribe audio',
       });
       setRehearsalState('waiting-for-user');
+    } finally {
+      isStoppingRecordingRef.current = false;
     }
   }, [
     addDebugLog,
@@ -517,6 +530,37 @@ export default function RehearsalPage() {
     stopRecording,
     toast,
   ]);
+
+  useEffect(() => {
+    onSilenceTimeoutRef.current = () => {
+      if (!carMode || !isRecording || isStoppingRecordingRef.current) {
+        return;
+      }
+
+      addDebugLog('Silence Auto-Stop', 'No voice detected for 5 seconds in car mode');
+      void handleStopRecording();
+    };
+  }, [addDebugLog, carMode, handleStopRecording, isRecording]);
+
+  useEffect(() => {
+    if (
+      !carMode ||
+      !hasStarted ||
+      isComplete ||
+      rehearsalState !== 'waiting-for-user' ||
+      isRecording ||
+      isAutoStartingRecordingRef.current ||
+      isStoppingRecordingRef.current
+    ) {
+      return;
+    }
+
+    isAutoStartingRecordingRef.current = true;
+    addDebugLog('Car Mode Auto-Start', 'Automatically restarting recording');
+    void handleStartRecording().finally(() => {
+      isAutoStartingRecordingRef.current = false;
+    });
+  }, [addDebugLog, carMode, handleStartRecording, hasStarted, isComplete, isRecording, rehearsalState]);
 
   const handleReplayExpectedLine = useCallback(async () => {
     await primeAudioPlayback().catch(() => undefined);
