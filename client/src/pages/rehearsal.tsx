@@ -24,6 +24,7 @@ import {
   serializeDebugLogEntries,
   type DebugLogEntry,
 } from '@/lib/debug-log';
+import { APP_VERSION, fetchLatestVersion, isUpdateAvailable } from '@/lib/version';
 import { AlertCircle, CarFront, Copy, Download, Settings, Theater } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -113,6 +114,9 @@ export default function RehearsalPage() {
   const [isComplete, setIsComplete] = useState(false);
   const [showSetup, setShowSetup] = useState(true);
   const [debugLogEntries, setDebugLogEntries] = useState<DebugLogEntry[]>([]);
+  const [latestVersion, setLatestVersion] = useState<string | null>(null);
+  const [isCheckingVersion, setIsCheckingVersion] = useState(false);
+  const [versionCheckedAt, setVersionCheckedAt] = useState<string | null>(null);
 
   const rehearsalLinesRef = useRef<RehearsalLine[]>([]);
   const currentLineIndexRef = useRef(-1);
@@ -133,6 +137,8 @@ export default function RehearsalPage() {
   }, []);
 
   const debugLogText = serializeDebugLogEntries(debugLogEntries);
+  const updateAvailable = isUpdateAvailable(APP_VERSION, latestVersion);
+  const hasVersionData = Boolean(latestVersion);
 
   useEffect(() => {
     localStorage.setItem(
@@ -183,6 +189,26 @@ export default function RehearsalPage() {
       setSelectedCharacter(availableCharacters[0]);
     }
   }, [script, selectedCharacter]);
+
+  const handleCheckVersion = useCallback(async () => {
+    setIsCheckingVersion(true);
+    const versionMetadata = await fetchLatestVersion();
+
+    setLatestVersion(versionMetadata?.version ?? null);
+    setVersionCheckedAt(new Date().toISOString());
+    setIsCheckingVersion(false);
+
+    if (!versionMetadata) {
+      addDebugLog('Version Check', 'Unable to fetch latest version metadata');
+      return;
+    }
+
+    addDebugLog('Version Check', `Current: ${APP_VERSION}, Latest: ${versionMetadata.version}`);
+  }, [addDebugLog]);
+
+  useEffect(() => {
+    void handleCheckVersion();
+  }, [handleCheckVersion]);
 
   useEffect(() => {
     if (script && selectedCharacter) {
@@ -715,6 +741,52 @@ export default function RehearsalPage() {
                     Download logs
                   </Button>
                 </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-lg">App Version</CardTitle>
+                <CardDescription>
+                  Check whether this device is already on the latest release.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm">
+                <p>
+                  Current version: <strong>{APP_VERSION}</strong>
+                </p>
+                <p>
+                  Latest available:{' '}
+                  <strong>{latestVersion ?? (isCheckingVersion ? 'Checking…' : 'Unavailable')}</strong>
+                </p>
+                <p
+                  className={
+                    !hasVersionData
+                      ? 'text-muted-foreground'
+                      : updateAvailable
+                      ? 'text-amber-600 dark:text-amber-400'
+                      : 'text-green-600 dark:text-green-400'
+                  }
+                >
+                  {!hasVersionData
+                    ? 'Latest version could not be checked right now.'
+                    : updateAvailable
+                    ? 'An update is available. Refresh after deployment to load it.'
+                    : 'You are using the latest version.'}
+                </p>
+                {versionCheckedAt && (
+                  <p className="text-muted-foreground">
+                    Last checked: {new Date(versionCheckedAt).toLocaleString()}
+                  </p>
+                )}
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={isCheckingVersion}
+                  onClick={() => void handleCheckVersion()}
+                >
+                  {isCheckingVersion ? 'Checking…' : 'Check for updates'}
+                </Button>
               </CardContent>
             </Card>
           </div>

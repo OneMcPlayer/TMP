@@ -4,6 +4,9 @@ import path from "path";
 
 export default defineConfig({
   base: "./",
+  define: {
+    "import.meta.env.VITE_APP_VERSION": JSON.stringify(process.env.npm_package_version ?? "dev"),
+  },
   plugins: [react()],
   resolve: {
     alias: {

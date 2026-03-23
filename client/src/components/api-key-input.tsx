@@ -61,20 +61,21 @@ export function ApiKeyInput({ onKeyChange }: ApiKeyInputProps) {
       </CardHeader>
       <CardContent>
         <div className="flex gap-2">
-          <div className="relative flex-1">
+          <div className="flex flex-1 items-center rounded-md border border-input bg-background pr-1">
             <Input
               data-testid="input-api-key"
               type={showKey ? 'text' : 'password'}
               value={key}
               onChange={(e) => handleKeyChange(e.target.value)}
               placeholder="sk-..."
-              className="pr-10"
+              className="border-0 pr-2 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
             />
             <Button
               data-testid="button-toggle-key-visibility"
-              size="sm"
+              type="button"
+              size="icon"
               variant="ghost"
-              className="absolute right-1 top-1/2 -translate-y-1/2"
+              className="h-7 w-7 shrink-0"
               onClick={() => setShowKey(!showKey)}
             >
               {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
