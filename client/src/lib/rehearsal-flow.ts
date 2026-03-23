@@ -33,3 +33,14 @@ export function needsRehearsalLineInitialization(
     );
   });
 }
+
+export function buildSkippedUserLine(line: RehearsalLine): RehearsalLine {
+  return {
+    ...line,
+    state: 'completed',
+    spokenText: '',
+    diff: [],
+    accuracy: 0,
+    correctionPlayed: false,
+  };
+}
