@@ -1,0 +1,102 @@
+import { Badge } from '@/components/ui/badge';
+import { CarFront, Clapperboard, FileText, Volume2 } from 'lucide-react';
+
+interface ScriptHeaderProps {
+  title: string;
+  author?: string;
+  totalLines: number;
+  completedLines: number;
+  userCharacter: string | null;
+  carMode?: boolean;
+  autoSpeakCorrections?: boolean;
+}
+
+export function ScriptHeader({
+  title,
+  author,
+  totalLines,
+  completedLines,
+  userCharacter,
+  carMode = false,
+  autoSpeakCorrections = false,
+}: ScriptHeaderProps) {
+  const progress = totalLines > 0 ? Math.round((completedLines / totalLines) * 100) : 0;
+
+  return (
+    <div className="p-4 border-b border-border bg-card/50">
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+            <Clapperboard className="w-5 h-5 text-primary" />
+          </div>
+          <div>
+            <h1 className="text-xl font-serif font-semibold">{title}</h1>
+            <div className="flex items-center gap-2 mt-1">
+              <FileText className="w-3.5 h-3.5 text-muted-foreground" />
+              <span className="text-sm text-muted-foreground">
+                {totalLines} lines total
+              </span>
+              {author && (
+                <>
+                  <span className="text-muted-foreground">•</span>
+                  <span className="text-sm text-muted-foreground">{author}</span>
+                </>
+              )}
+              {userCharacter && (
+                <>
+                  <span className="text-muted-foreground">•</span>
+                  <Badge variant="secondary" className="text-xs">
+                    Playing as {userCharacter}
+                  </Badge>
+                </>
+              )}
+              {carMode && (
+                <Badge variant="outline" className="text-xs">
+                  <CarFront className="w-3 h-3 mr-1" />
+                  Car mode
+                </Badge>
+              )}
+              {autoSpeakCorrections && (
+                <Badge variant="outline" className="text-xs">
+                  <Volume2 className="w-3 h-3 mr-1" />
+                  Spoken corrections
+                </Badge>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <div className="text-right">
+            <p className="text-2xl font-bold text-primary">{progress}%</p>
+            <p className="text-xs text-muted-foreground">Complete</p>
+          </div>
+          <div className="w-16 h-16">
+            <svg className="w-full h-full -rotate-90" viewBox="0 0 36 36">
+              <circle
+                cx="18"
+                cy="18"
+                r="15"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="3"
+                className="text-muted/30"
+              />
+              <circle
+                cx="18"
+                cy="18"
+                r="15"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="3"
+                strokeDasharray={`${progress} 100`}
+                strokeLinecap="round"
+                className="text-primary transition-all duration-500"
+              />
+            </svg>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

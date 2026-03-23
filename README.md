@@ -1,1 +1,69 @@
-# TMP
+# Finale di partita Rehearsal Partner
+
+A browser-only rehearsal page for **Finale di partita** by Samuel Beckett. It is built as a static Vite app and is ready to publish on **GitHub Pages**.
+
+## Features
+
+- Memory-style rehearsal with your own lines hidden until it is your turn
+- OpenAI text-to-speech for the other character's lines
+- OpenAI speech-to-text for your spoken lines
+- Correction rules that ignore punctuation and anything inside parentheses
+- Optional spoken correction playback when your line is wrong
+- Larger-control **car mode** for quick phone use
+
+## Car Mode Note
+
+This is still a standard web page, so it does **not** have native Apple CarPlay integration or access to CarPlay-specific system UI. The included **car mode** is a browser-side layout and recording mode designed to be easier to use from your phone while connected in the car.
+
+## Script Format
+
+The app supports either legacy `character`/`text` lines or `speaker`/`line` lines. The bundled script is already configured for **Finale di partita** in `client/public/script.json`.
+
+Example:
+
+```json
+{
+  "title": "FINALE DI PARTITA",
+  "author": "Samuel Beckett",
+  "language": "it",
+  "lines": [
+    { "speaker": "CLOV", "line": "Finita, è finita..." }
+  ]
+}
+```
+
+## Local Development
+
+```bash
+npm install
+npm run dev
+```
+
+## Production Build
+
+```bash
+npm run build
+```
+
+The static output is written to `dist/`.
+
+## GitHub Pages Deployment
+
+This repo already includes `.github/workflows/deploy.yml`.
+
+1. Push the repository to GitHub.
+2. Open **Settings > Pages** in the GitHub repository.
+3. Set the source to **GitHub Actions**.
+4. Push to `main`.
+
+The workflow will build the app and deploy `dist/` to GitHub Pages automatically.
+
+## Personal Use Notes
+
+- Your OpenAI API key is stored only in `localStorage` on the device you use.
+- There is no backend server in this setup.
+- Spoken correction mode is especially useful when you do not want to watch the screen.
+
+## License
+
+MIT
