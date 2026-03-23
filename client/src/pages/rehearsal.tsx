@@ -17,12 +17,19 @@ import {
 import { computeWordDiff, calculateAccuracy } from '@/lib/word-diff';
 import { buildTranscriptionPrompt, getSpeakableText, normalizeScript } from '@/lib/script-utils';
 import type { RawScript, RehearsalLine, RehearsalState, Script } from '@/lib/types';
-import { AlertCircle, CarFront, Settings, Theater } from 'lucide-react';
+import {
+  appendDebugLogEntry,
+  createDebugLogEntry,
+  serializeDebugLogEntries,
+  type DebugLogEntry,
+} from '@/lib/debug-log';
+import { AlertCircle, CarFront, Copy, Download, Settings, Theater } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
 
 const PREFERENCES_STORAGE_KEY = 'rehearsal_preferences';
 
@@ -104,6 +111,7 @@ export default function RehearsalPage() {
   const [hasStarted, setHasStarted] = useState(false);
   const [isComplete, setIsComplete] = useState(false);
   const [showSetup, setShowSetup] = useState(true);
+  const [debugLogEntries, setDebugLogEntries] = useState<DebugLogEntry[]>([]);
 
   const rehearsalLinesRef = useRef<RehearsalLine[]>([]);
   const currentLineIndexRef = useRef(-1);
@@ -115,6 +123,14 @@ export default function RehearsalPage() {
   useEffect(() => {
     currentLineIndexRef.current = currentLineIndex;
   }, [currentLineIndex]);
+
+  const addDebugLog = useCallback((event: string, details?: string) => {
+    setDebugLogEntries((entries) =>
+      appendDebugLogEntry(entries, createDebugLogEntry(event, details)),
+    );
+  }, []);
+
+  const debugLogText = serializeDebugLogEntries(debugLogEntries);
 
   useEffect(() => {
     localStorage.setItem(
@@ -136,13 +152,18 @@ export default function RehearsalPage() {
         }
         const rawData: RawScript = await response.json();
         setScript(normalizeScript(rawData));
+        addDebugLog('Script Loaded', 'Loaded script.json successfully');
       } catch (err) {
         setLoadError(err instanceof Error ? err.message : 'Failed to load script');
+        addDebugLog(
+          'Script Load Error',
+          err instanceof Error ? err.message : 'Failed to load script',
+        );
       }
     }
 
     void loadScript();
-  }, []);
+  }, [addDebugLog]);
 
   useEffect(() => {
     if (!script) {
@@ -206,6 +227,7 @@ export default function RehearsalPage() {
       }
 
       setRehearsalState('playing-correction');
+      addDebugLog('Playing Correction', `Line ${lineIndex + 1} (${line.character})`);
 
       try {
         const audioBlob = await textToSpeech(expectedText, {
@@ -222,12 +244,20 @@ export default function RehearsalPage() {
         );
       } catch (err) {
         if (isPlaybackPermissionError(err)) {
+          addDebugLog(
+            'Correction Playback Blocked',
+            err instanceof Error ? err.message : 'Browser blocked autoplay',
+          );
           toast({
             title: 'Tap to Hear the Correct Line',
             description:
               "Automatic playback was blocked by your browser. Tap 'Hear Correct Line' to play it.",
           });
         } else {
+          addDebugLog(
+            'Correction Playback Error',
+            err instanceof Error ? err.message : 'Failed to read the correct line',
+          );
           toast({
             variant: 'destructive',
             title: 'Correction Playback Error',
@@ -238,13 +268,14 @@ export default function RehearsalPage() {
         setRehearsalState('showing-feedback');
       }
     },
-    [toast],
+    [addDebugLog, toast],
   );
 
   const processLine = useCallback(async (lineIndex: number) => {
     const lines = rehearsalLinesRef.current;
     const line = lines[lineIndex];
     if (!line) {
+      addDebugLog('Rehearsal Complete', 'Reached end of script');
       setIsComplete(true);
       return;
     }
@@ -256,6 +287,7 @@ export default function RehearsalPage() {
     const speakableText = getSpeakableText(line.text);
 
     if (!speakableText) {
+      addDebugLog('Skipped Silent Line', `Line ${lineIndex + 1} has no speakable text`);
       setRehearsalLines(prev => prev.map((l, i) => 
         i === lineIndex
           ? {
@@ -276,6 +308,7 @@ export default function RehearsalPage() {
           void processLine(nextIndex);
         }, 300);
       } else {
+        addDebugLog('Rehearsal Complete', 'Reached end of script');
         setIsComplete(true);
         setRehearsalState('idle');
       }
@@ -284,12 +317,17 @@ export default function RehearsalPage() {
 
     if (!line.isUserLine) {
       setRehearsalState('playing-tts');
+      addDebugLog('Playing Partner Line', `Line ${lineIndex + 1} (${line.character})`);
       try {
         const audioBlob = await textToSpeech(speakableText, {
           voice: getVoiceForCharacter(line.character),
         });
         await playAudioBlob(audioBlob);
       } catch (err) {
+        addDebugLog(
+          'TTS Error',
+          err instanceof Error ? err.message : 'Failed to speak line',
+        );
         toast({
           variant: 'destructive',
           title: 'TTS Error',
@@ -309,13 +347,15 @@ export default function RehearsalPage() {
           void processLine(nextIndex);
         }, 500);
       } else {
+        addDebugLog('Rehearsal Complete', 'Reached end of script');
         setIsComplete(true);
         setRehearsalState('idle');
       }
     } else {
+      addDebugLog('Waiting For User Line', `Line ${lineIndex + 1} (${line.character})`);
       setRehearsalState('waiting-for-user');
     }
-  }, [toast]);
+  }, [addDebugLog, toast]);
 
   const handleStart = useCallback(async () => {
     if (!hasApiKey) {
@@ -335,29 +375,36 @@ export default function RehearsalPage() {
       return;
     }
 
+    addDebugLog('Session Started', `Character: ${selectedCharacter}`);
     await primeAudioPlayback().catch(() => undefined);
     setShowSetup(false);
     setHasStarted(true);
     setCurrentLineIndex(0);
     void processLine(0);
-  }, [hasApiKey, selectedCharacter, processLine, toast]);
+  }, [addDebugLog, hasApiKey, selectedCharacter, processLine, toast]);
 
   const handleStartRecording = useCallback(async () => {
     try {
       await primeAudioPlayback().catch(() => undefined);
       await startRecording();
       setRehearsalState('recording');
+      addDebugLog('Recording Started');
     } catch (err) {
+      addDebugLog(
+        'Microphone Error',
+        err instanceof Error ? err.message : 'Microphone access denied',
+      );
       toast({
         variant: 'destructive',
         title: 'Microphone Error',
         description: 'Please allow microphone access to record your lines',
       });
     }
-  }, [startRecording, toast]);
+  }, [addDebugLog, startRecording, toast]);
 
   const handleStopRecording = useCallback(async () => {
     setRehearsalState('processing');
+    addDebugLog('Recording Stopped', 'Processing user audio');
     
     try {
       await primeAudioPlayback().catch(() => undefined);
@@ -375,6 +422,10 @@ export default function RehearsalPage() {
       const diff = computeWordDiff(expectedText, transcription);
       const accuracy = calculateAccuracy(diff);
       const hasMeaningfulErrors = diff.some((item) => item.status !== 'correct');
+      addDebugLog(
+        'Line Scored',
+        `Line ${idx + 1} accuracy: ${Math.round(accuracy)}%, transcription: "${transcription}"`,
+      );
 
       setRehearsalLines(prev => prev.map((l, i) => 
         i === idx 
@@ -390,11 +441,16 @@ export default function RehearsalPage() {
       ));
 
       if (hasMeaningfulErrors && autoSpeakCorrections) {
+        addDebugLog('Auto Correction Triggered', `Line ${idx + 1}`);
         await speakExpectedLine(idx);
       } else {
         setRehearsalState('showing-feedback');
       }
     } catch (err) {
+      addDebugLog(
+        'Transcription Error',
+        err instanceof Error ? err.message : 'Failed to transcribe audio',
+      );
       toast({
         variant: 'destructive',
         title: 'Transcription Error',
@@ -403,6 +459,7 @@ export default function RehearsalPage() {
       setRehearsalState('waiting-for-user');
     }
   }, [
+    addDebugLog,
     autoSpeakCorrections,
     script,
     selectedCharacter,
@@ -437,7 +494,8 @@ export default function RehearsalPage() {
       ),
     );
     setRehearsalState('waiting-for-user');
-  }, []);
+    addDebugLog('Retry Line', `Line ${idx + 1}`);
+  }, [addDebugLog]);
 
   const handleNext = useCallback(() => {
     const idx = currentLineIndexRef.current;
@@ -445,15 +503,18 @@ export default function RehearsalPage() {
     const nextIndex = idx + 1;
     if (nextIndex < lines.length) {
       setCurrentLineIndex(nextIndex);
+      addDebugLog('Moved To Next Line', `Line ${nextIndex + 1}`);
       processLine(nextIndex);
     } else {
+      addDebugLog('Rehearsal Complete', 'Reached end of script');
       setIsComplete(true);
       setRehearsalState('idle');
     }
-  }, [processLine]);
+  }, [addDebugLog, processLine]);
 
   const handleRestart = useCallback(() => {
     setShowSetup(true);
+    addDebugLog('Session Restarted');
     if (script && selectedCharacter) {
       const lines: RehearsalLine[] = script.lines.map((line, index) => ({
         index,
@@ -468,11 +529,44 @@ export default function RehearsalPage() {
       setIsComplete(false);
       setRehearsalState('idle');
     }
-  }, [script, selectedCharacter]);
+  }, [addDebugLog, script, selectedCharacter]);
 
   const handleToggleSetup = useCallback(() => {
     setShowSetup(prev => !prev);
   }, []);
+
+  const handleCopyDebugLogs = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(debugLogText);
+      addDebugLog('Debug Logs Copied');
+      toast({
+        title: 'Debug Logs Copied',
+        description: 'The logs are in your clipboard and ready to paste.',
+      });
+    } catch (err) {
+      addDebugLog(
+        'Copy Debug Logs Error',
+        err instanceof Error ? err.message : 'Clipboard write failed',
+      );
+      toast({
+        variant: 'destructive',
+        title: 'Copy Failed',
+        description: 'Unable to copy debug logs. You can still select and copy from the box.',
+      });
+    }
+  }, [addDebugLog, debugLogText, toast]);
+
+  const handleDownloadDebugLogs = useCallback(() => {
+    const fileName = `rehearsal-debug-${new Date().toISOString().replace(/[:.]/g, '-')}.txt`;
+    const blob = new Blob([debugLogText], { type: 'text/plain;charset=utf-8' });
+    const blobUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = blobUrl;
+    anchor.download = fileName;
+    anchor.click();
+    URL.revokeObjectURL(blobUrl);
+    addDebugLog('Debug Logs Downloaded', fileName);
+  }, [addDebugLog, debugLogText]);
 
   if (loadError) {
     return (
@@ -577,6 +671,38 @@ export default function RehearsalPage() {
                 </CardContent>
               </Card>
             </div>
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-lg">Debug Logs</CardTitle>
+                <CardDescription>
+                  Copy or download this ready-to-paste log when you need help debugging.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <Textarea
+                  data-testid="debug-log-output"
+                  value={debugLogText}
+                  readOnly
+                  className="min-h-40 font-mono text-xs"
+                />
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      void handleCopyDebugLogs();
+                    }}
+                  >
+                    <Copy className="mr-2 h-4 w-4" />
+                    Copy logs
+                  </Button>
+                  <Button type="button" variant="outline" onClick={handleDownloadDebugLogs}>
+                    <Download className="mr-2 h-4 w-4" />
+                    Download logs
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
           </div>
         )}
 
