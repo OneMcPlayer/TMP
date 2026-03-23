@@ -1,6 +1,10 @@
 const API_KEY_STORAGE_KEY = 'openai_api_key';
 const TTS_MODEL = 'tts-1';
 const STT_MODEL = 'gpt-4o-transcribe';
+const SILENT_WAV_DATA_URI =
+  'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=';
+
+let playbackPrimingPromise: Promise<void> | null = null;
 
 export function getApiKey(): string | null {
   return localStorage.getItem(API_KEY_STORAGE_KEY);
@@ -86,10 +90,40 @@ export async function speechToText(
   return result.text;
 }
 
+export function __resetPlaybackPrimingForTests(): void {
+  playbackPrimingPromise = null;
+}
+
+export function primeAudioPlayback(): Promise<void> {
+  if (playbackPrimingPromise) {
+    return playbackPrimingPromise;
+  }
+
+  playbackPrimingPromise = (async () => {
+    const audio = new Audio(SILENT_WAV_DATA_URI);
+    audio.preload = 'auto';
+    audio.setAttribute('playsinline', '');
+    audio.muted = true;
+
+    try {
+      await audio.play();
+      audio.pause();
+      audio.currentTime = 0;
+    } catch (error) {
+      playbackPrimingPromise = null;
+      throw error instanceof Error ? error : new Error('Audio playback priming failed');
+    }
+  })();
+
+  return playbackPrimingPromise;
+}
+
 export function playAudioBlob(blob: Blob): Promise<void> {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(blob);
     const audio = new Audio(url);
+    audio.preload = 'auto';
+    audio.setAttribute('playsinline', '');
     
     audio.onended = () => {
       URL.revokeObjectURL(url);

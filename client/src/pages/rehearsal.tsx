@@ -7,7 +7,13 @@ import { RehearsalControls } from '@/components/rehearsal-controls';
 import { ScriptHeader } from '@/components/script-header';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { useAudioRecorder } from '@/hooks/use-audio-recorder';
-import { textToSpeech, speechToText, playAudioBlob, getApiKey } from '@/lib/openai';
+import {
+  textToSpeech,
+  speechToText,
+  playAudioBlob,
+  getApiKey,
+  primeAudioPlayback,
+} from '@/lib/openai';
 import { computeWordDiff, calculateAccuracy } from '@/lib/word-diff';
 import { buildTranscriptionPrompt, getSpeakableText, normalizeScript } from '@/lib/script-utils';
 import type { RawScript, RehearsalLine, RehearsalState, Script } from '@/lib/types';
@@ -29,6 +35,21 @@ const VOICE_MAP: Record<string, string> = {
 
 function getVoiceForCharacter(character: string): string {
   return VOICE_MAP[character.toUpperCase()] || 'alloy';
+}
+
+function isPlaybackPermissionError(error: unknown): boolean {
+  if (error instanceof DOMException && error.name === 'NotAllowedError') {
+    return true;
+  }
+
+  const message = error instanceof Error ? error.message.toLowerCase() : '';
+  return (
+    message.includes('notallowederror') ||
+    message.includes('not allowed') ||
+    message.includes('permission') ||
+    message.includes('user gesture') ||
+    message.includes('interaction')
+  );
 }
 
 interface PracticePreferences {
@@ -200,11 +221,19 @@ export default function RehearsalPage() {
           ),
         );
       } catch (err) {
-        toast({
-          variant: 'destructive',
-          title: 'Correction Playback Error',
-          description: err instanceof Error ? err.message : 'Failed to read the correct line',
-        });
+        if (isPlaybackPermissionError(err)) {
+          toast({
+            title: 'Tap to Hear the Correct Line',
+            description:
+              "Automatic playback was blocked by your browser. Tap 'Hear Correct Line' to play it.",
+          });
+        } else {
+          toast({
+            variant: 'destructive',
+            title: 'Correction Playback Error',
+            description: err instanceof Error ? err.message : 'Failed to read the correct line',
+          });
+        }
       } finally {
         setRehearsalState('showing-feedback');
       }
@@ -288,7 +317,7 @@ export default function RehearsalPage() {
     }
   }, [toast]);
 
-  const handleStart = useCallback(() => {
+  const handleStart = useCallback(async () => {
     if (!hasApiKey) {
       toast({
         variant: 'destructive',
@@ -306,14 +335,16 @@ export default function RehearsalPage() {
       return;
     }
 
+    await primeAudioPlayback().catch(() => undefined);
     setShowSetup(false);
     setHasStarted(true);
     setCurrentLineIndex(0);
-    processLine(0);
+    void processLine(0);
   }, [hasApiKey, selectedCharacter, processLine, toast]);
 
   const handleStartRecording = useCallback(async () => {
     try {
+      await primeAudioPlayback().catch(() => undefined);
       await startRecording();
       setRehearsalState('recording');
     } catch (err) {
@@ -329,6 +360,7 @@ export default function RehearsalPage() {
     setRehearsalState('processing');
     
     try {
+      await primeAudioPlayback().catch(() => undefined);
       const audioBlob = await stopRecording();
       const idx = currentLineIndexRef.current;
       const currentLine = rehearsalLinesRef.current[idx];
@@ -379,7 +411,8 @@ export default function RehearsalPage() {
     toast,
   ]);
 
-  const handleReplayExpectedLine = useCallback(() => {
+  const handleReplayExpectedLine = useCallback(async () => {
+    await primeAudioPlayback().catch(() => undefined);
     void speakExpectedLine();
   }, [speakExpectedLine]);
 
