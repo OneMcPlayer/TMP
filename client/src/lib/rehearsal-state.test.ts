@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { buildRehearsalLines, needsRehearsalLineInitialization } from './rehearsal-flow';
+import {
+  buildRehearsalLines,
+  buildSkippedUserLine,
+  needsRehearsalLineInitialization,
+} from './rehearsal-flow';
 import type { Script } from './types';
 
 const script: Script = {
@@ -47,4 +51,15 @@ test('needsRehearsalLineInitialization detects missing or stale lines', () => {
   const mutatedLines = [...freshLines];
   mutatedLines[1] = { ...mutatedLines[1], text: 'Non posso più.' };
   assert.equal(needsRehearsalLineInitialization(mutatedLines, script, 'CLOV'), true);
+});
+
+test('buildSkippedUserLine marks a user line as completed with skipped metadata', () => {
+  const lines = buildRehearsalLines(script, 'HAMM');
+  const skippedLine = buildSkippedUserLine(lines[0]);
+
+  assert.equal(skippedLine.state, 'completed');
+  assert.equal(skippedLine.spokenText, '');
+  assert.deepEqual(skippedLine.diff, []);
+  assert.equal(skippedLine.accuracy, 0);
+  assert.equal(skippedLine.correctionPlayed, false);
 });

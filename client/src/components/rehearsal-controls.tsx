@@ -22,6 +22,7 @@ interface RehearsalControlsProps {
   onRestart: () => void;
   onReplayExpectedLine: () => void;
   onRetryLine: () => void;
+  onSkipLine: () => void;
   hasStarted: boolean;
   isComplete: boolean;
   carMode?: boolean;
@@ -39,6 +40,7 @@ export function RehearsalControls({
   onRestart,
   onReplayExpectedLine,
   onRetryLine,
+  onSkipLine,
   hasStarted,
   isComplete,
   carMode = false,
@@ -105,15 +107,28 @@ export function RehearsalControls({
       )}
 
       {state === 'waiting-for-user' && (
-        <Button
-          data-testid="button-record"
-          onClick={onStartRecording}
-          size="lg"
-          className={actionButtonClass}
-        >
-          {carMode ? <MicVocal className="w-8 h-8" /> : <Mic className="w-5 h-5" />}
-          {carMode ? 'Tap To Speak' : 'Record Your Line'}
-        </Button>
+        <div className={cn('flex gap-3', carMode && 'flex-col')}>
+          <Button
+            data-testid="button-record"
+            onClick={onStartRecording}
+            size="lg"
+            className={actionButtonClass}
+          >
+            {carMode ? <MicVocal className="w-8 h-8" /> : <Mic className="w-5 h-5" />}
+            {carMode ? 'Tap To Speak' : 'Record Your Line'}
+          </Button>
+          <Button
+            data-testid="button-skip-line"
+            type="button"
+            variant="outline"
+            onClick={onSkipLine}
+            size="lg"
+            className={carMode ? actionButtonClass : 'gap-2'}
+          >
+            <ArrowRight className="w-5 h-5" />
+            Skip Line
+          </Button>
+        </div>
       )}
 
       {state === 'recording' && (

@@ -16,7 +16,11 @@ import {
 } from '@/lib/openai';
 import { computeWordDiff, calculateAccuracy } from '@/lib/word-diff';
 import { buildTranscriptionPrompt, getSpeakableText, normalizeScript } from '@/lib/script-utils';
-import { buildRehearsalLines, needsRehearsalLineInitialization } from '@/lib/rehearsal-flow';
+import {
+  buildRehearsalLines,
+  buildSkippedUserLine,
+  needsRehearsalLineInitialization,
+} from '@/lib/rehearsal-flow';
 import type { RawScript, RehearsalLine, RehearsalState, Script } from '@/lib/types';
 import {
   appendDebugLogEntry,
@@ -558,6 +562,22 @@ export default function RehearsalPage() {
     }
   }, [addDebugLog, processLine]);
 
+  const handleSkipLine = useCallback(() => {
+    const idx = currentLineIndexRef.current;
+    const line = rehearsalLinesRef.current[idx];
+    if (!line || !line.isUserLine) {
+      return;
+    }
+
+    setRehearsalLines((previousLines) =>
+      previousLines.map((rehearsalLine, index) =>
+        index === idx ? buildSkippedUserLine(rehearsalLine) : rehearsalLine,
+      ),
+    );
+    addDebugLog('Line Skipped', `Line ${idx + 1} (${line.character})`);
+    setRehearsalState('showing-feedback');
+  }, [addDebugLog]);
+
   const handleRestart = useCallback(() => {
     setShowSetup(true);
     addDebugLog('Session Restarted');
@@ -818,6 +838,7 @@ export default function RehearsalPage() {
               onRestart={handleRestart}
               onReplayExpectedLine={handleReplayExpectedLine}
               onRetryLine={handleRetryLine}
+              onSkipLine={handleSkipLine}
               hasStarted={hasStarted}
               isComplete={isComplete}
               carMode={carMode}
