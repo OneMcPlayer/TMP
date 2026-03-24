@@ -17,6 +17,7 @@ import {
 import { computeWordDiff, calculateAccuracy } from '@/lib/word-diff';
 import { buildTranscriptionPrompt, getSpeakableText, normalizeScript } from '@/lib/script-utils';
 import { startSessionTransition } from '@/lib/session-start';
+import { startRecordingTransition } from '@/lib/recording-start';
 import {
   buildRehearsalLines,
   buildSkippedUserLine,
@@ -469,8 +470,10 @@ export default function RehearsalPage() {
 
   const handleStartRecording = useCallback(async () => {
     try {
-      await primeAudioPlayback().catch(() => undefined);
-      await startRecording();
+      await startRecordingTransition({
+        startRecording,
+        primeAudioPlayback,
+      });
       setRehearsalState('recording');
       addDebugLog('Recording Started');
     } catch (err) {
@@ -484,7 +487,7 @@ export default function RehearsalPage() {
         description: 'Please allow microphone access to record your lines',
       });
     }
-  }, [addDebugLog, startRecording, toast]);
+  }, [addDebugLog, primeAudioPlayback, startRecording, toast]);
 
   const handleStopRecording = useCallback(async () => {
     if (isStoppingRecordingRef.current) {
