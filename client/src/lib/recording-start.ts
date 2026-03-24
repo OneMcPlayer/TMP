@@ -1,5 +1,5 @@
 export interface StartRecordingTransitionHandlers {
-  startRecording: () => Promise<void>;
+  startRecording: () => Promise<boolean>;
   primeAudioPlayback: () => Promise<void>;
   onPrimeAudioPlaybackError?: (error: unknown) => void;
 }
@@ -8,9 +8,15 @@ export async function startRecordingTransition({
   startRecording,
   primeAudioPlayback,
   onPrimeAudioPlaybackError,
-}: StartRecordingTransitionHandlers): Promise<void> {
-  await startRecording();
+}: StartRecordingTransitionHandlers): Promise<boolean> {
+  const didStartRecording = await startRecording();
+  if (!didStartRecording) {
+    return false;
+  }
+
   void primeAudioPlayback().catch((error) => {
     onPrimeAudioPlaybackError?.(error);
   });
+
+  return true;
 }

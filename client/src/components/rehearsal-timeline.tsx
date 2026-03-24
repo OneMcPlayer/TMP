@@ -33,7 +33,7 @@ export function RehearsalTimeline({ lines, currentLineIndex }: RehearsalTimeline
   }
 
   return (
-    <ScrollArea className="flex-1" ref={scrollRef}>
+    <ScrollArea className="flex-1 min-h-0" ref={scrollRef}>
       <div className="space-y-3 p-4">
         {visibleLines.map((line) => (
           <div

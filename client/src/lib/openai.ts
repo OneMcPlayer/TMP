@@ -29,6 +29,23 @@ interface SpeechToTextOptions {
   prompt?: string;
 }
 
+export function getAudioUploadFilename(audioBlob: Blob): string {
+  const mimeType = audioBlob.type.split(';', 1)[0];
+
+  switch (mimeType) {
+    case 'audio/mp4':
+      return 'recording.mp4';
+    case 'audio/mpeg':
+      return 'recording.mp3';
+    case 'audio/wav':
+      return 'recording.wav';
+    case 'audio/webm':
+      return 'recording.webm';
+    default:
+      return 'recording.webm';
+  }
+}
+
 function isRetryableStatus(status: number): boolean {
   return status === 408 || status === 429 || status >= 500;
 }
@@ -141,7 +158,7 @@ export async function speechToText(
   }
 
   const formData = new FormData();
-  formData.append('file', audioBlob, 'recording.webm');
+  formData.append('file', audioBlob, getAudioUploadFilename(audioBlob));
   formData.append('model', STT_MODEL);
   if (options.prompt) {
     formData.append('prompt', options.prompt);

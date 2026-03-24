@@ -3,7 +3,7 @@ import { calculateAudioLevel, isSilentAudioLevel } from '@/lib/silence-detection
 
 interface UseAudioRecorderReturn {
   isRecording: boolean;
-  startRecording: () => Promise<void>;
+  startRecording: () => Promise<boolean>;
   stopRecording: () => Promise<Blob>;
   error: string | null;
 }
@@ -14,11 +14,34 @@ interface UseAudioRecorderOptions {
   onSilenceTimeout?: () => void;
 }
 
+export const NO_SPEECH_DETECTED_ERROR = 'No speech detected before auto-stop';
+export const NO_AUDIO_CAPTURED_ERROR = 'No audio captured';
+
 export function getPreferredAudioMimeType(
   mediaRecorder: Pick<typeof MediaRecorder, 'isTypeSupported'>,
 ): string | undefined {
   const supportedMimeTypes = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'] as const;
   return supportedMimeTypes.find((mimeType) => mediaRecorder.isTypeSupported(mimeType));
+}
+
+export function getRecordingCaptureError({
+  blobSize,
+  detectedSpeech,
+  silenceTriggered,
+}: {
+  blobSize: number;
+  detectedSpeech: boolean;
+  silenceTriggered: boolean;
+}): string | null {
+  if (blobSize > 0) {
+    return null;
+  }
+
+  if (silenceTriggered && !detectedSpeech) {
+    return NO_SPEECH_DETECTED_ERROR;
+  }
+
+  return NO_AUDIO_CAPTURED_ERROR;
 }
 
 export function useAudioRecorder(
@@ -32,8 +55,11 @@ export function useAudioRecorder(
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const sourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const silenceRafRef = useRef<number | null>(null);
   const silenceTriggeredRef = useRef(false);
+  const detectedSpeechRef = useRef(false);
+  const isStartingRef = useRef(false);
 
   const stopSilenceMonitor = useCallback(() => {
     if (silenceRafRef.current !== null) {
@@ -52,19 +78,43 @@ export function useAudioRecorder(
     }
   }, []);
 
-  const startRecording = useCallback(async () => {
+  const cleanupRecordingResources = useCallback(() => {
+    stopSilenceMonitor();
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+    mediaRecorderRef.current = null;
+    chunksRef.current = [];
+    setIsRecording(false);
+  }, [stopSilenceMonitor]);
+
+  const startRecording = useCallback(async (): Promise<boolean> => {
+    if (isStartingRef.current) {
+      return false;
+    }
+
+    const currentRecorder = mediaRecorderRef.current;
+    if (currentRecorder && currentRecorder.state !== 'inactive') {
+      return false;
+    }
+
+    isStartingRef.current = true;
+    let stream: MediaStream | null = null;
+
     try {
       setError(null);
       chunksRef.current = [];
+      detectedSpeechRef.current = false;
+      silenceTriggeredRef.current = false;
 
-      const stream = await navigator.mediaDevices.getUserMedia({ 
+      stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
           channelCount: options.carMode ? 1 : undefined,
-        } 
+        },
       });
+      streamRef.current = stream;
 
       const mimeType = getPreferredAudioMimeType(MediaRecorder);
       const mediaRecorder = mimeType
@@ -102,6 +152,7 @@ export function useAudioRecorder(
           const audioLevel = calculateAudioLevel(pcmData);
 
           if (!isSilentAudioLevel(audioLevel)) {
+            detectedSpeechRef.current = true;
             lastNonSilentAt = performance.now();
           } else if (performance.now() - lastNonSilentAt >= silenceTimeoutMs) {
             silenceTriggeredRef.current = true;
@@ -123,12 +174,20 @@ export function useAudioRecorder(
 
       mediaRecorder.start(100);
       setIsRecording(true);
+      return true;
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to access microphone';
       setError(message);
+      stopSilenceMonitor();
+      stream?.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+      mediaRecorderRef.current = null;
+      chunksRef.current = [];
       throw err;
+    } finally {
+      isStartingRef.current = false;
     }
-  }, [options.carMode, options.onSilenceTimeout, silenceTimeoutMs]);
+  }, [options.carMode, options.onSilenceTimeout, silenceTimeoutMs, stopSilenceMonitor]);
 
   const stopRecording = useCallback(async (): Promise<Blob> => {
     return new Promise((resolve, reject) => {
@@ -141,19 +200,24 @@ export function useAudioRecorder(
 
       mediaRecorder.onstop = () => {
         const blob = new Blob(chunksRef.current, { type: mediaRecorder.mimeType });
-        stopSilenceMonitor();
-        mediaRecorder.stream.getTracks().forEach(track => track.stop());
+        const captureError = getRecordingCaptureError({
+          blobSize: blob.size,
+          detectedSpeech: detectedSpeechRef.current,
+          silenceTriggered: silenceTriggeredRef.current,
+        });
+        cleanupRecordingResources();
 
-        setIsRecording(false);
-        mediaRecorderRef.current = null;
-        chunksRef.current = [];
+        if (captureError) {
+          reject(new Error(captureError));
+          return;
+        }
 
         resolve(blob);
       };
 
       mediaRecorder.stop();
     });
-  }, [stopSilenceMonitor]);
+  }, [cleanupRecordingResources]);
 
   return {
     isRecording,

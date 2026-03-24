@@ -6,7 +6,11 @@ import { RehearsalTimeline } from '@/components/rehearsal-timeline';
 import { RehearsalControls } from '@/components/rehearsal-controls';
 import { ScriptHeader } from '@/components/script-header';
 import { ThemeToggle } from '@/components/theme-toggle';
-import { useAudioRecorder } from '@/hooks/use-audio-recorder';
+import {
+  NO_AUDIO_CAPTURED_ERROR,
+  NO_SPEECH_DETECTED_ERROR,
+  useAudioRecorder,
+} from '@/hooks/use-audio-recorder';
 import {
   textToSpeech,
   speechToText,
@@ -166,6 +170,8 @@ export default function RehearsalPage() {
   const rehearsalLinesRef = useRef<RehearsalLine[]>([]);
   const currentLineIndexRef = useRef(-1);
   const isStartingRef = useRef(false);
+  const isStartingRecordingRef = useRef(false);
+  const isRecordingRef = useRef(false);
   const rehearsalStateRef = useRef<RehearsalState>('idle');
   const carModeAutoStartTimeoutRef = useRef<number | null>(null);
   const wakeLockSentinelRef = useRef<WakeLockSentinel | null>(null);
@@ -177,6 +183,10 @@ export default function RehearsalPage() {
   useEffect(() => {
     currentLineIndexRef.current = currentLineIndex;
   }, [currentLineIndex]);
+
+  useEffect(() => {
+    isRecordingRef.current = isRecording;
+  }, [isRecording]);
 
   const addDebugLog = useCallback((event: string, details?: string) => {
     setDebugLogEntries((entries) =>
@@ -673,9 +683,20 @@ export default function RehearsalPage() {
   }, [addDebugLog, hasApiKey, processLine, rehearsalLinesRef, script, selectedCharacter, toast]);
 
   const handleStartRecording = useCallback(async () => {
+    if (
+      isStartingRecordingRef.current ||
+      isStoppingRecordingRef.current ||
+      isRecordingRef.current ||
+      rehearsalStateRef.current === 'recording'
+    ) {
+      return;
+    }
+
+    isStartingRecordingRef.current = true;
+
     try {
       clearCarModeAutoStartTimeout();
-      await startRecordingTransition({
+      const didStartRecording = await startRecordingTransition({
         startRecording,
         primeAudioPlayback,
         onPrimeAudioPlaybackError: (error) => {
@@ -685,6 +706,11 @@ export default function RehearsalPage() {
           );
         },
       });
+
+      if (!didStartRecording) {
+        return;
+      }
+
       updateRehearsalState('recording');
       addDebugLog('Recording Started');
     } catch (err) {
@@ -697,8 +723,17 @@ export default function RehearsalPage() {
         title: 'Microphone Error',
         description: 'Please allow microphone access to record your lines',
       });
+    } finally {
+      isStartingRecordingRef.current = false;
     }
-  }, [addDebugLog, clearCarModeAutoStartTimeout, primeAudioPlayback, startRecording, toast]);
+  }, [
+    addDebugLog,
+    clearCarModeAutoStartTimeout,
+    primeAudioPlayback,
+    startRecording,
+    toast,
+    updateRehearsalState,
+  ]);
 
   const handleStopRecording = useCallback(async () => {
     if (isStoppingRecordingRef.current) {
@@ -754,14 +789,36 @@ export default function RehearsalPage() {
         updateRehearsalState('showing-feedback');
       }
     } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to transcribe audio';
+
+      if (errorMessage === NO_SPEECH_DETECTED_ERROR) {
+        addDebugLog('No Speech Detected', 'Car mode auto-stop did not hear any speech');
+        toast({
+          title: 'No Speech Detected',
+          description: 'Car mode stopped listening because it did not hear speech. Try the line again.',
+        });
+        updateRehearsalState('waiting-for-user');
+        return;
+      }
+
+      if (errorMessage === NO_AUDIO_CAPTURED_ERROR) {
+        addDebugLog('Empty Recording', 'No audio data was captured before transcription');
+        toast({
+          title: 'Recording Was Empty',
+          description: 'The browser returned an empty recording. Please try the line again.',
+        });
+        updateRehearsalState('waiting-for-user');
+        return;
+      }
+
       addDebugLog(
         'Transcription Error',
-        err instanceof Error ? err.message : 'Failed to transcribe audio',
+        errorMessage,
       );
       toast({
         variant: 'destructive',
         title: 'Transcription Error',
-        description: err instanceof Error ? err.message : 'Failed to transcribe audio',
+        description: errorMessage,
       });
       updateRehearsalState('waiting-for-user');
     } finally {
@@ -798,6 +855,7 @@ export default function RehearsalPage() {
       isComplete ||
       rehearsalState !== 'waiting-for-user' ||
       isRecording ||
+      isStartingRecordingRef.current ||
       isAutoStartingRecordingRef.current ||
       isStoppingRecordingRef.current
     ) {
@@ -809,7 +867,8 @@ export default function RehearsalPage() {
 
       if (
         rehearsalStateRef.current !== 'waiting-for-user' ||
-        isRecording ||
+        isRecordingRef.current ||
+        isStartingRecordingRef.current ||
         isAutoStartingRecordingRef.current ||
         isStoppingRecordingRef.current
       ) {
@@ -1096,8 +1155,8 @@ export default function RehearsalPage() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <header className="border-b border-border bg-card/50 sticky top-0 z-50">
+    <div className="min-h-screen flex flex-col overflow-x-hidden">
+      <header className="safe-area-top safe-area-x border-b border-border bg-background/95 backdrop-blur sticky top-0 z-50 supports-[backdrop-filter]:bg-background/80">
         <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between gap-4">
           <div className="flex items-center gap-2">
             <Theater className="w-6 h-6 text-primary" />
@@ -1119,7 +1178,7 @@ export default function RehearsalPage() {
         </div>
       </header>
 
-      <main className="flex-1 flex flex-col max-w-4xl mx-auto w-full">
+      <main className="flex-1 flex flex-col min-h-0 max-w-4xl mx-auto w-full">
         {showSetup && (
           <div className="p-4 space-y-4">
             <div className="grid gap-4 md:grid-cols-3">
@@ -1291,7 +1350,7 @@ export default function RehearsalPage() {
           currentLineIndex={currentLineIndex}
         />
 
-        <div className="sticky bottom-0 border-t border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <div className="safe-area-bottom safe-area-x sticky bottom-0 border-t border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
           <div className="p-4">
             <RehearsalControls
               state={rehearsalState}

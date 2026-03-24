@@ -69,6 +69,14 @@ export function RehearsalControls({
   const navigationButtonClass = carMode
     ? 'h-20 w-full rounded-3xl text-lg font-semibold'
     : 'gap-2';
+  const compactActionButtonClass = carMode ? actionButtonClass : 'gap-2 w-full sm:w-auto';
+  const compactNavigationButtonClass = carMode
+    ? navigationButtonClass
+    : 'gap-2 w-full sm:w-auto';
+  const actionGroupClass = cn(
+    'flex gap-3 items-stretch',
+    carMode ? 'flex-col' : 'flex-col sm:flex-row sm:flex-wrap sm:justify-center',
+  );
 
   if (isComplete) {
     return (
@@ -125,12 +133,12 @@ export function RehearsalControls({
       )}
 
       {state === 'waiting-for-user' && (
-        <div className={cn('flex gap-3', carMode && 'flex-col')}>
+        <div className={actionGroupClass}>
           <Button
             data-testid="button-record"
             onClick={onStartRecording}
             size="lg"
-            className={actionButtonClass}
+            className={compactActionButtonClass}
           >
             {carMode ? <MicVocal className="w-8 h-8" /> : <Mic className="w-5 h-5" />}
             {carMode ? 'Tap To Speak' : 'Record Your Line'}
@@ -170,7 +178,7 @@ export function RehearsalControls({
             variant="outline"
             onClick={onSkipLine}
             size="lg"
-            className={carMode ? actionButtonClass : 'gap-2'}
+            className={compactActionButtonClass}
           >
             <ArrowRight className="w-5 h-5" />
             Skip Line
@@ -213,7 +221,7 @@ export function RehearsalControls({
       )}
 
       {state === 'showing-feedback' && (
-        <div className={cn('flex gap-3', carMode && 'flex-col')}>
+        <div className={actionGroupClass}>
           {carMode && (
             <Button
               type="button"
@@ -234,7 +242,7 @@ export function RehearsalControls({
               variant="outline"
               size="lg"
               onClick={onReplayExpectedLine}
-              className={carMode ? actionButtonClass : 'gap-2'}
+              className={compactActionButtonClass}
             >
               <Volume2 className="w-5 h-5" />
               Hear Correct Line
@@ -247,7 +255,7 @@ export function RehearsalControls({
               variant="secondary"
               size="lg"
               onClick={onRetryLine}
-              className={carMode ? actionButtonClass : 'gap-2'}
+              className={compactActionButtonClass}
             >
               <RotateCcw className="w-5 h-5" />
               Retry Line
@@ -259,7 +267,7 @@ export function RehearsalControls({
             onClick={onNext}
             size="lg"
             disabled={carMode && !canGoNext}
-            className={carMode ? actionButtonClass : 'gap-2'}
+            className={carMode ? actionButtonClass : compactNavigationButtonClass}
           >
             <ArrowRight className="w-5 h-5" />
             Next Line

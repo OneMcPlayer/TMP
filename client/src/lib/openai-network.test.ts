@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, test } from 'node:test';
 
-import { speechToText, textToSpeech } from './openai';
+import { getAudioUploadFilename, speechToText, textToSpeech } from './openai';
 
 const originalFetch = globalThis.fetch;
 const originalLocalStorage = globalThis.localStorage;
@@ -82,4 +82,19 @@ test('speechToText retries once on network error', async () => {
 
   assert.equal(calls, 2);
   assert.equal(result, 'hello world');
+});
+
+test('getAudioUploadFilename matches the blob mime type', () => {
+  assert.equal(
+    getAudioUploadFilename(new Blob(['voice-data'], { type: 'audio/mp4' })),
+    'recording.mp4',
+  );
+  assert.equal(
+    getAudioUploadFilename(new Blob(['voice-data'], { type: 'audio/webm;codecs=opus' })),
+    'recording.webm',
+  );
+  assert.equal(
+    getAudioUploadFilename(new Blob(['voice-data'], { type: 'audio/wav' })),
+    'recording.wav',
+  );
 });

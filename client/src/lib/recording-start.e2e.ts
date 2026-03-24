@@ -9,6 +9,7 @@ test('[e2e] first record tap prioritizes microphone start before playback primin
   const transitionPromise = startRecordingTransition({
     startRecording: async () => {
       timeline.push('recording-started');
+      return true;
     },
     primeAudioPlayback: () =>
       new Promise<void>((resolve) => {

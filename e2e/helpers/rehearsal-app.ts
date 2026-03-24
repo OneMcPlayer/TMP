@@ -12,7 +12,7 @@ export interface MockScript {
   lines: MockScriptLine[];
 }
 
-type MicrophoneMode = 'normal' | 'pending';
+type MicrophoneMode = 'normal' | 'pending' | 'controlled';
 
 export interface RehearsalAppOptions {
   apiKey?: string;
@@ -93,6 +93,11 @@ export async function setupRehearsalApp(
         writable: true,
         value: 0,
       });
+      Object.defineProperty(window, '__e2eGetUserMediaCalls', {
+        configurable: true,
+        writable: true,
+        value: 0,
+      });
 
       const mediaSession = {
         metadata: null,
@@ -162,10 +167,34 @@ export async function setupRehearsalApp(
 
       const fakeTracks = [{ stop() {} }];
       const mediaDevices = navigator.mediaDevices ?? {};
+      let resolveControlledGetUserMedia:
+        | (() => void)
+        | null = null;
+      Object.defineProperty(window, '__e2eResolveControlledGetUserMedia', {
+        configurable: true,
+        value: () => {
+          resolveControlledGetUserMedia?.();
+          resolveControlledGetUserMedia = null;
+        },
+      });
       Object.assign(mediaDevices, {
         getUserMedia() {
+          window.__e2eGetUserMediaCalls += 1;
+
           if (initMicrophoneMode === 'pending') {
             return new Promise(() => undefined);
+          }
+
+          if (initMicrophoneMode === 'controlled') {
+            return new Promise((resolve) => {
+              resolveControlledGetUserMedia = () => {
+                resolve({
+                  getTracks() {
+                    return fakeTracks;
+                  },
+                });
+              };
+            });
           }
 
           return Promise.resolve({

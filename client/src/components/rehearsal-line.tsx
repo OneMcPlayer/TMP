@@ -37,7 +37,7 @@ function DiffDisplay({ diff }: { diff: WordDiff[] }) {
         <span
           key={index}
           className={cn(
-            'px-1 py-0.5 rounded text-sm font-medium',
+            'max-w-full break-words px-1 py-0.5 rounded text-sm font-medium',
             item.status === 'correct' && 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
             item.status === 'missing' && 'bg-red-100 text-red-800 line-through dark:bg-red-900/30 dark:text-red-300',
             item.status === 'extra' && 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300',
@@ -134,7 +134,7 @@ export function RehearsalLineComponent({ line, isCurrentLine }: RehearsalLinePro
           ) : (
             <>
               <p className={cn(
-                'text-base leading-relaxed',
+                'text-base leading-relaxed break-words',
                 line.state === 'completed' && line.isUserLine && 'font-medium'
               )}>
                 <ScriptText text={line.text} />
@@ -143,7 +143,7 @@ export function RehearsalLineComponent({ line, isCurrentLine }: RehearsalLinePro
               {showResults && (
                 <div className="mt-3 pt-3 border-t border-border/50">
                   <p className="text-xs text-muted-foreground mb-1">Transcribed</p>
-                  <p className="text-sm leading-relaxed">{line.spokenText}</p>
+                  <p className="text-sm leading-relaxed break-words">{line.spokenText}</p>
 
                   {hasErrors && line.diff && (
                     <>

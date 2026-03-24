@@ -9,6 +9,7 @@ test('startRecordingTransition starts recording before priming audio', async () 
   const transitionPromise = startRecordingTransition({
     startRecording: async () => {
       steps.push('startRecording');
+      return true;
     },
     primeAudioPlayback: () =>
       new Promise<void>((resolve) => {
@@ -28,9 +29,10 @@ test('startRecordingTransition ignores primeAudioPlayback failures after recordi
   let started = false;
   const errors: string[] = [];
 
-  await startRecordingTransition({
+  const didStartRecording = await startRecordingTransition({
     startRecording: async () => {
       started = true;
+      return true;
     },
     primeAudioPlayback: async () => {
       throw new Error('Playback blocked');
@@ -40,7 +42,22 @@ test('startRecordingTransition ignores primeAudioPlayback failures after recordi
     },
   });
 
+  assert.equal(didStartRecording, true);
   assert.equal(started, true);
   await Promise.resolve();
   assert.deepEqual(errors, ['Playback blocked']);
+});
+
+test('startRecordingTransition skips audio priming when recording start is ignored', async () => {
+  let primeCalled = false;
+
+  const didStartRecording = await startRecordingTransition({
+    startRecording: async () => false,
+    primeAudioPlayback: async () => {
+      primeCalled = true;
+    },
+  });
+
+  assert.equal(didStartRecording, false);
+  assert.equal(primeCalled, false);
 });
