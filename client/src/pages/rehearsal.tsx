@@ -37,9 +37,9 @@ import {
   requestServiceWorkerDebugSnapshot,
   subscribeToPwaDebugLogs,
 } from '@/lib/pwa-debug';
-import { APP_VERSION, fetchLatestVersion, isUpdateAvailable } from '@/lib/version';
+import { APP_VERSION, buildUpdateReloadUrl, fetchLatestVersion, isUpdateAvailable } from '@/lib/version';
 import { isSlowPreparation, shouldOfferPreparationRecovery } from '@/lib/rehearsal-latency';
-import { AlertCircle, CarFront, Copy, Download, Settings, Smartphone, Theater } from 'lucide-react';
+import { AlertCircle, CarFront, Copy, Download, RefreshCw, Settings, Smartphone, Theater } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -158,6 +158,7 @@ export default function RehearsalPage() {
   const [debugLogEntries, setDebugLogEntries] = useState<DebugLogEntry[]>([]);
   const [latestVersion, setLatestVersion] = useState<string | null>(null);
   const [isCheckingVersion, setIsCheckingVersion] = useState(false);
+  const [isApplyingUpdate, setIsApplyingUpdate] = useState(false);
   const [versionCheckedAt, setVersionCheckedAt] = useState<string | null>(null);
   const [slowPreparationSeconds, setSlowPreparationSeconds] = useState(0);
   const [wakeLockStatus, setWakeLockStatus] = useState<WakeLockStatus>('inactive');
@@ -384,6 +385,57 @@ export default function RehearsalPage() {
 
     addDebugLog('Version Check', `Current: ${APP_VERSION}, Latest: ${versionMetadata.version}`);
   }, [addDebugLog]);
+
+  const handleApplyUpdate = useCallback(async () => {
+    if (isApplyingUpdate) {
+      return;
+    }
+
+    if (!navigator.onLine) {
+      addDebugLog('App Update Blocked', 'Device is offline');
+      toast({
+        variant: 'destructive',
+        title: 'Update Needs Internet',
+        description: 'Connect to the internet before reloading the app update.',
+      });
+      return;
+    }
+
+    setIsApplyingUpdate(true);
+    addDebugLog(
+      'App Update Requested',
+      `Current: ${APP_VERSION}, Latest: ${latestVersion ?? 'unknown'}`,
+    );
+    await capturePwaRuntimeDiagnostics(APP_VERSION, 'Pre-Update Snapshot');
+
+    try {
+      if ('serviceWorker' in navigator) {
+        const registration = await navigator.serviceWorker.getRegistration().catch(() => null);
+
+        if (registration) {
+          addDebugLog('Service Worker Update Check', `scope=${registration.scope}`);
+          await registration.update();
+          addDebugLog('Service Worker Update Triggered');
+
+          if (registration.waiting) {
+            registration.waiting.postMessage({ type: 'skip-waiting' });
+            addDebugLog('Service Worker Skip Waiting Requested');
+          }
+        } else {
+          addDebugLog('Service Worker Update Check', 'No registration found');
+        }
+      }
+    } catch (error) {
+      addDebugLog(
+        'App Update Error',
+        error instanceof Error ? error.message : 'Unable to refresh the app bundle',
+      );
+    }
+
+    const reloadUrl = buildUpdateReloadUrl(window.location.href);
+    addDebugLog('App Reload Requested', reloadUrl);
+    window.location.replace(reloadUrl);
+  }, [addDebugLog, isApplyingUpdate, latestVersion, toast]);
 
   useEffect(() => {
     void handleCheckVersion();
@@ -1187,7 +1239,7 @@ export default function RehearsalPage() {
                   {!hasVersionData
                     ? 'Latest version could not be checked right now.'
                     : updateAvailable
-                    ? 'An update is available. Refresh after deployment to load it.'
+                    ? 'An update is available. Reload the app to install it.'
                     : 'You are using the latest version.'}
                 </p>
                 {versionCheckedAt && (
@@ -1195,14 +1247,28 @@ export default function RehearsalPage() {
                     Last checked: {new Date(versionCheckedAt).toLocaleString()}
                   </p>
                 )}
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={isCheckingVersion}
-                  onClick={() => void handleCheckVersion()}
-                >
-                  {isCheckingVersion ? 'Checking…' : 'Check for updates'}
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={isCheckingVersion}
+                    onClick={() => void handleCheckVersion()}
+                  >
+                    {isCheckingVersion ? 'Checking…' : 'Check for updates'}
+                  </Button>
+                  {updateAvailable && (
+                    <Button
+                      type="button"
+                      disabled={isApplyingUpdate}
+                      onClick={() => {
+                        void handleApplyUpdate();
+                      }}
+                    >
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                      {isApplyingUpdate ? 'Reloading…' : 'Reload app now'}
+                    </Button>
+                  )}
+                </div>
               </CardContent>
             </Card>
           </div>

@@ -32,6 +32,15 @@ export function isUpdateAvailable(currentVersion: string, latestVersion: string 
   return normalizedCurrent !== normalizedLatest;
 }
 
+export function buildUpdateReloadUrl(
+  currentUrl: string,
+  nonce: string | number = Date.now(),
+): string {
+  const url = new URL(currentUrl);
+  url.searchParams.set('update', String(nonce));
+  return url.toString();
+}
+
 export async function fetchLatestVersion(
   fetcher: typeof fetch = fetch,
   baseUrl: string = runtimeEnv?.BASE_URL ?? '/',

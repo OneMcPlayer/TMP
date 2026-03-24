@@ -86,6 +86,12 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("message", (event) => {
+  if (event.data?.type === "skip-waiting") {
+    void broadcastDebugLog("Service Worker Skip Waiting");
+    void self.skipWaiting();
+    return;
+  }
+
   if (event.data?.type !== "pwa-debug-snapshot") {
     return;
   }

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { fetchLatestVersion, isUpdateAvailable } from './version';
+import { buildUpdateReloadUrl, fetchLatestVersion, isUpdateAvailable } from './version';
 
 test('isUpdateAvailable returns true only when latest version differs', () => {
   assert.equal(isUpdateAvailable('1.0.0', '1.0.0'), false);
@@ -37,4 +37,16 @@ test('fetchLatestVersion returns null for invalid payload or failed response', a
 
   assert.equal(await fetchLatestVersion(badPayloadFetcher, '/'), null);
   assert.equal(await fetchLatestVersion(failedResponseFetcher, '/'), null);
+});
+
+test('buildUpdateReloadUrl adds or replaces the update cache-buster query parameter', () => {
+  assert.equal(
+    buildUpdateReloadUrl('https://example.test/app', '123'),
+    'https://example.test/app?update=123',
+  );
+
+  assert.equal(
+    buildUpdateReloadUrl('https://example.test/app?foo=bar#hash', '456'),
+    'https://example.test/app?foo=bar&update=456#hash',
+  );
 });
