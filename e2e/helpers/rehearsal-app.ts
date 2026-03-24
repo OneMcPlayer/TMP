@@ -56,7 +56,7 @@ export async function setupRehearsalApp(
     apiKey = 'sk-playwright-test-key',
     autoSpeakCorrections = true,
     carMode = false,
-    latestVersion = '1.0.10',
+    latestVersion = '1.0.11',
     microphoneMode = 'normal',
     script = PARTNER_LEAD_SCRIPT,
     selectedCharacter = null,

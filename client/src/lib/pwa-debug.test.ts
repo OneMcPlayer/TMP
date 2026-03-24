@@ -59,7 +59,7 @@ test('resolvePwaDisplayMode prefers installed display modes over browser tabs', 
 
 test('formatPwaRuntimeSnapshot produces a compact troubleshooting summary', () => {
   const summary = formatPwaRuntimeSnapshot({
-    appVersion: '1.0.10',
+    appVersion: '1.0.11',
     displayMode: 'standalone',
     isOnline: true,
     visibilityState: 'visible',
@@ -78,7 +78,7 @@ test('formatPwaRuntimeSnapshot produces a compact troubleshooting summary', () =
   assert.equal(
     summary,
     [
-      'version=1.0.10',
+      'version=1.0.11',
       'mode=standalone',
       'online=yes',
       'visibility=visible',
