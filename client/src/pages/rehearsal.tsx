@@ -31,9 +31,15 @@ import {
   serializeDebugLogEntries,
   type DebugLogEntry,
 } from '@/lib/debug-log';
+import {
+  capturePwaRuntimeDiagnostics,
+  consumeQueuedPwaDebugLogs,
+  requestServiceWorkerDebugSnapshot,
+  subscribeToPwaDebugLogs,
+} from '@/lib/pwa-debug';
 import { APP_VERSION, fetchLatestVersion, isUpdateAvailable } from '@/lib/version';
 import { isSlowPreparation, shouldOfferPreparationRecovery } from '@/lib/rehearsal-latency';
-import { AlertCircle, CarFront, Copy, Download, Settings, Theater } from 'lucide-react';
+import { AlertCircle, CarFront, Copy, Download, Settings, Smartphone, Theater } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -931,6 +937,25 @@ export default function RehearsalPage() {
     addDebugLog('Debug Logs Downloaded', fileName);
   }, [addDebugLog, debugLogText]);
 
+  const handleCapturePwaDiagnostics = useCallback(async () => {
+    await capturePwaRuntimeDiagnostics(APP_VERSION, 'Manual PWA Snapshot', true);
+    requestServiceWorkerDebugSnapshot();
+    toast({
+      title: 'PWA Diagnostics Captured',
+      description: 'Current PWA and mobile runtime details were added to the debug log.',
+    });
+  }, [toast]);
+
+  useEffect(() => {
+    consumeQueuedPwaDebugLogs().forEach((entry) => {
+      addDebugLog(entry.event, entry.details);
+    });
+
+    return subscribeToPwaDebugLogs((entry) => {
+      addDebugLog(entry.event, entry.details);
+    });
+  }, [addDebugLog]);
+
   useEffect(() => {
     if (!('mediaSession' in navigator)) {
       return;
@@ -1085,7 +1110,7 @@ export default function RehearsalPage() {
               <CardHeader className="pb-3">
                 <CardTitle className="text-lg">Debug Logs</CardTitle>
                 <CardDescription>
-                  Copy or download this ready-to-paste log when you need help debugging.
+                  Copy or download this ready-to-paste log when you need help debugging, including PWA, service worker, and mobile runtime diagnostics.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
@@ -1109,6 +1134,10 @@ export default function RehearsalPage() {
                   <Button type="button" variant="outline" onClick={handleDownloadDebugLogs}>
                     <Download className="mr-2 h-4 w-4" />
                     Download logs
+                  </Button>
+                  <Button type="button" variant="outline" onClick={() => void handleCapturePwaDiagnostics()}>
+                    <Smartphone className="mr-2 h-4 w-4" />
+                    Capture PWA status
                   </Button>
                 </div>
               </CardContent>

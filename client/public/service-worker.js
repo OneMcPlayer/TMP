@@ -10,19 +10,89 @@ const precacheUrls = [
   new URL("./app-icon-maskable.svg", self.registration.scope).toString(),
 ];
 
+function getErrorMessage(error) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return String(error);
+}
+
+async function broadcastDebugLog(event, details) {
+  const clients = await self.clients.matchAll({
+    includeUncontrolled: true,
+    type: "window",
+  });
+
+  const payload = {
+    type: "pwa-debug-log",
+    event,
+    details,
+    timestamp: new Date().toISOString(),
+  };
+
+  for (const client of clients) {
+    client.postMessage(payload);
+  }
+}
+
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(cacheName).then((cache) => cache.addAll(precacheUrls)).then(() => self.skipWaiting()),
+    (async () => {
+      await broadcastDebugLog(
+        "Service Worker Install",
+        `version=${version} | cache=${cacheName} | assets=${precacheUrls.length}`,
+      );
+      const cache = await caches.open(cacheName);
+      await cache.addAll(precacheUrls);
+      await self.skipWaiting();
+      await broadcastDebugLog(
+        "Service Worker Install Complete",
+        `cache=${cacheName}`,
+      );
+    })().catch(async (error) => {
+      await broadcastDebugLog(
+        "Service Worker Install Error",
+        getErrorMessage(error),
+      );
+      throw error;
+    }),
   );
 });
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(
-        keys.map((key) => (key !== cacheName ? caches.delete(key) : Promise.resolve(false))),
-      ),
-    ).then(() => self.clients.claim()),
+    (async () => {
+      const keys = await caches.keys();
+      const deletedCacheCount = (
+        await Promise.all(
+          keys.map((key) => (key !== cacheName ? caches.delete(key) : Promise.resolve(false))),
+        )
+      ).filter(Boolean).length;
+
+      await self.clients.claim();
+      await broadcastDebugLog(
+        "Service Worker Activated",
+        `cache=${cacheName} | deleted-caches=${deletedCacheCount}`,
+      );
+    })().catch(async (error) => {
+      await broadcastDebugLog(
+        "Service Worker Activate Error",
+        getErrorMessage(error),
+      );
+      throw error;
+    }),
+  );
+});
+
+self.addEventListener("message", (event) => {
+  if (event.data?.type !== "pwa-debug-snapshot") {
+    return;
+  }
+
+  void broadcastDebugLog(
+    "Service Worker Snapshot",
+    `version=${version} | cache=${cacheName} | scope=${self.registration.scope}`,
   );
 });
 
@@ -46,7 +116,11 @@ self.addEventListener("fetch", (event) => {
           void caches.open(cacheName).then((cache) => cache.put(request, responseClone));
           return response;
         })
-        .catch(async () => {
+        .catch(async (error) => {
+          await broadcastDebugLog(
+            "Service Worker Navigate Fallback",
+            `${request.url} | ${getErrorMessage(error)}`,
+          );
           const cache = await caches.open(cacheName);
           return (await cache.match(request)) || (await cache.match(appShellUrl));
         }),

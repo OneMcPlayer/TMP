@@ -12,6 +12,7 @@ A browser-only rehearsal page for **Finale di partita** by Samuel Beckett. It is
 - Larger-control **car mode** for quick phone use
 - Installable **PWA** shell for home-screen use
 - Car-mode **screen wake lock** when the browser supports it
+- Debug logs that capture **PWA**, **service worker**, and mobile runtime state
 
 ## Car Mode Note
 
