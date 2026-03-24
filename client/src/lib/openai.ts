@@ -3,6 +3,7 @@ const TTS_MODEL = 'tts-1';
 const STT_MODEL = 'gpt-4o-transcribe';
 const API_REQUEST_TIMEOUT_MS = 15_000;
 const MAX_API_RETRY_ATTEMPTS = 1;
+const PLAYBACK_PRIMING_TIMEOUT_MS = 1_500;
 const SILENT_WAV_DATA_URI =
   'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=';
 
@@ -38,6 +39,29 @@ function isRetryableNetworkError(error: unknown): boolean {
   }
 
   return error instanceof TypeError;
+}
+
+function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  timeoutMessage: string,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timeoutId = globalThis.setTimeout(() => {
+      reject(new Error(timeoutMessage));
+    }, timeoutMs);
+
+    promise.then(
+      (value) => {
+        globalThis.clearTimeout(timeoutId);
+        resolve(value);
+      },
+      (error) => {
+        globalThis.clearTimeout(timeoutId);
+        reject(error);
+      },
+    );
+  });
 }
 
 async function fetchWithRetry(
@@ -144,7 +168,7 @@ export function __resetPlaybackPrimingForTests(): void {
   playbackPrimingPromise = null;
 }
 
-export function primeAudioPlayback(): Promise<void> {
+export function primeAudioPlayback(timeoutMs: number = PLAYBACK_PRIMING_TIMEOUT_MS): Promise<void> {
   if (playbackPrimingPromise) {
     return playbackPrimingPromise;
   }
@@ -156,7 +180,11 @@ export function primeAudioPlayback(): Promise<void> {
     audio.muted = true;
 
     try {
-      await audio.play();
+      await withTimeout(
+        audio.play(),
+        timeoutMs,
+        `Audio playback priming timed out after ${timeoutMs}ms`,
+      );
       audio.pause();
       audio.currentTime = 0;
     } catch (error) {

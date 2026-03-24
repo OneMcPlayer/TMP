@@ -4,6 +4,7 @@ import { startSessionTransition } from './session-start';
 
 test('[e2e] first-screen to second-screen transition does not wait for slow primeAudioPlayback', async () => {
   let isSecondScreenVisible = false;
+  let processedFirstLine = false;
   let releasePrime: () => void = () => undefined;
 
   const delayedPrime = new Promise<void>((resolve) => {
@@ -17,11 +18,14 @@ test('[e2e] first-screen to second-screen transition does not wait for slow prim
     setHasStarted: () => undefined,
     setCurrentLineIndex: () => undefined,
     primeAudioPlayback: () => delayedPrime,
-    processFirstLine: () => undefined,
+    processFirstLine: () => {
+      processedFirstLine = true;
+    },
   });
 
   await Promise.resolve();
   assert.equal(isSecondScreenVisible, true);
+  assert.equal(processedFirstLine, true);
 
   releasePrime();
   await transitionPromise;

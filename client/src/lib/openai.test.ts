@@ -7,7 +7,7 @@ import {
   primeAudioPlayback,
 } from './openai';
 
-type MockAudioMode = 'resolve' | 'reject';
+type MockAudioMode = 'resolve' | 'reject' | 'pending';
 
 class MockAudio {
   static instances: MockAudio[] = [];
@@ -37,6 +37,10 @@ class MockAudio {
   play(): Promise<void> {
     if (MockAudio.mode === 'reject') {
       return Promise.reject(new DOMException('Playback blocked', 'NotAllowedError'));
+    }
+
+    if (MockAudio.mode === 'pending') {
+      return new Promise(() => undefined);
     }
 
     queueMicrotask(() => {
@@ -93,6 +97,19 @@ test('primeAudioPlayback rejects when playback is blocked', async () => {
   });
 
   assert.equal(MockAudio.instances.length, 1);
+});
+
+test('primeAudioPlayback rejects when priming hangs past the timeout', async () => {
+  MockAudio.mode = 'pending';
+
+  await assert.rejects(() => primeAudioPlayback(10), (error: unknown) => {
+    assert.ok(error instanceof Error);
+    assert.equal(error.message, 'Audio playback priming timed out after 10ms');
+    return true;
+  });
+
+  await assert.rejects(() => primeAudioPlayback(10));
+  assert.equal(MockAudio.instances.length, 2);
 });
 
 test('playAudioBlob sets inline playback attributes and resolves', async () => {

@@ -38,6 +38,7 @@ test('startSessionTransition updates the UI state before priming audio', async (
     'setHasStarted:true',
     'setCurrentLineIndex:0',
     'primeAudioPlayback:start',
+    'processFirstLine',
   ]);
 
   resolvePrime?.();
@@ -48,13 +49,14 @@ test('startSessionTransition updates the UI state before priming audio', async (
     'setHasStarted:true',
     'setCurrentLineIndex:0',
     'primeAudioPlayback:start',
-    'primeAudioPlayback:done',
     'processFirstLine',
+    'primeAudioPlayback:done',
   ]);
 });
 
 test('startSessionTransition continues even when priming fails', async () => {
   let processCalls = 0;
+  const errors: string[] = [];
 
   await startSessionTransition({
     setShowSetup: () => undefined,
@@ -66,7 +68,12 @@ test('startSessionTransition continues even when priming fails', async () => {
     processFirstLine: () => {
       processCalls += 1;
     },
+    onPrimeAudioPlaybackError: (error) => {
+      errors.push(error instanceof Error ? error.message : String(error));
+    },
   });
 
   assert.equal(processCalls, 1);
+  await Promise.resolve();
+  assert.deepEqual(errors, ['Playback blocked']);
 });

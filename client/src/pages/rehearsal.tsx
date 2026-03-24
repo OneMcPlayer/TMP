@@ -608,6 +608,12 @@ export default function RehearsalPage() {
         processFirstLine: () => {
           void processLine(0);
         },
+        onPrimeAudioPlaybackError: (error) => {
+          addDebugLog(
+            'Audio Priming Error',
+            `Session start: ${error instanceof Error ? error.message : 'Audio playback priming failed'}`,
+          );
+        },
       });
     } finally {
       isStartingRef.current = false;
@@ -620,6 +626,12 @@ export default function RehearsalPage() {
       await startRecordingTransition({
         startRecording,
         primeAudioPlayback,
+        onPrimeAudioPlaybackError: (error) => {
+          addDebugLog(
+            'Audio Priming Error',
+            `Recording start: ${error instanceof Error ? error.message : 'Audio playback priming failed'}`,
+          );
+        },
       });
       updateRehearsalState('recording');
       addDebugLog('Recording Started');
@@ -645,7 +657,12 @@ export default function RehearsalPage() {
     addDebugLog('Recording Stopped', 'Processing user audio');
     
     try {
-      await primeAudioPlayback().catch(() => undefined);
+      void primeAudioPlayback().catch((error) => {
+        addDebugLog(
+          'Audio Priming Error',
+          `Stop recording: ${error instanceof Error ? error.message : 'Audio playback priming failed'}`,
+        );
+      });
       const audioBlob = await stopRecording();
       const idx = currentLineIndexRef.current;
       const currentLine = rehearsalLinesRef.current[idx];
