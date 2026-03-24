@@ -1,6 +1,8 @@
 const API_KEY_STORAGE_KEY = 'openai_api_key';
 const TTS_MODEL = 'tts-1';
 const STT_MODEL = 'gpt-4o-transcribe';
+const API_REQUEST_TIMEOUT_MS = 15_000;
+const MAX_API_RETRY_ATTEMPTS = 1;
 const SILENT_WAV_DATA_URI =
   'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=';
 
@@ -26,6 +28,54 @@ interface SpeechToTextOptions {
   prompt?: string;
 }
 
+function isRetryableStatus(status: number): boolean {
+  return status === 408 || status === 429 || status >= 500;
+}
+
+function isRetryableNetworkError(error: unknown): boolean {
+  if (error instanceof DOMException) {
+    return error.name === 'AbortError';
+  }
+
+  return error instanceof TypeError;
+}
+
+async function fetchWithRetry(
+  input: RequestInfo | URL,
+  init: RequestInit,
+  attempts: number = MAX_API_RETRY_ATTEMPTS + 1,
+): Promise<Response> {
+  let lastError: unknown = null;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const controller = new AbortController();
+    const timeoutId = globalThis.setTimeout(() => {
+      controller.abort();
+    }, API_REQUEST_TIMEOUT_MS);
+
+    try {
+      const response = await fetch(input, {
+        ...init,
+        signal: controller.signal,
+      });
+
+      globalThis.clearTimeout(timeoutId);
+
+      if (response.ok || attempt === attempts || !isRetryableStatus(response.status)) {
+        return response;
+      }
+    } catch (error) {
+      globalThis.clearTimeout(timeoutId);
+      lastError = error;
+      if (attempt === attempts || !isRetryableNetworkError(error)) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError ?? new Error('Request failed');
+}
+
 export async function textToSpeech(
   text: string,
   options: TextToSpeechOptions = {},
@@ -35,7 +85,7 @@ export async function textToSpeech(
     throw new Error('OpenAI API key not configured');
   }
 
-  const response = await fetch('https://api.openai.com/v1/audio/speech', {
+  const response = await fetchWithRetry('https://api.openai.com/v1/audio/speech', {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${apiKey}`,
@@ -73,7 +123,7 @@ export async function speechToText(
     formData.append('prompt', options.prompt);
   }
 
-  const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+  const response = await fetchWithRetry('https://api.openai.com/v1/audio/transcriptions', {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${apiKey}`,
