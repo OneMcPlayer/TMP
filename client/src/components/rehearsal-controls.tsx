@@ -23,6 +23,7 @@ interface RehearsalControlsProps {
   onReplayExpectedLine: () => void;
   onRetryLine: () => void;
   onSkipLine: () => void;
+  onRecoverPreparation: () => void;
   hasStarted: boolean;
   isComplete: boolean;
   carMode?: boolean;
@@ -31,6 +32,7 @@ interface RehearsalControlsProps {
   disabled?: boolean;
   showSlowPreparationHint?: boolean;
   slowPreparationSeconds?: number;
+  showPreparationRecoveryAction?: boolean;
 }
 
 export function RehearsalControls({
@@ -43,6 +45,7 @@ export function RehearsalControls({
   onReplayExpectedLine,
   onRetryLine,
   onSkipLine,
+  onRecoverPreparation,
   hasStarted,
   isComplete,
   carMode = false,
@@ -51,6 +54,7 @@ export function RehearsalControls({
   disabled = false,
   showSlowPreparationHint = false,
   slowPreparationSeconds = 0,
+  showPreparationRecoveryAction = false,
 }: RehearsalControlsProps) {
   const actionButtonClass = carMode
     ? 'h-24 w-full rounded-3xl text-xl font-semibold shadow-lg'
@@ -210,11 +214,18 @@ export function RehearsalControls({
       )}
 
       {state === 'idle' && hasStarted && (
-        <div className="text-muted-foreground flex items-center gap-2">
-          <Loader2 className="w-4 h-4 animate-spin" />
-          {showSlowPreparationHint
-            ? `Preparing next line... (${slowPreparationSeconds}s so far, this can happen on mobile networks)`
-            : 'Preparing next line...'}
+        <div className={cn('flex items-center gap-3', carMode && 'flex-col items-stretch')}>
+          <div className="text-muted-foreground flex items-center gap-2">
+            <Loader2 className="w-4 h-4 animate-spin" />
+            {showSlowPreparationHint
+              ? `Preparing next line... (${slowPreparationSeconds}s so far, this can happen on mobile networks)`
+              : 'Preparing next line...'}
+          </div>
+          {showPreparationRecoveryAction && (
+            <Button type="button" variant="outline" onClick={onRecoverPreparation}>
+              Retry now
+            </Button>
+          )}
         </div>
       )}
     </div>

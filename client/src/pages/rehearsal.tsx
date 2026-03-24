@@ -30,7 +30,7 @@ import {
   type DebugLogEntry,
 } from '@/lib/debug-log';
 import { APP_VERSION, fetchLatestVersion, isUpdateAvailable } from '@/lib/version';
-import { isSlowPreparation } from '@/lib/rehearsal-latency';
+import { isSlowPreparation, shouldOfferPreparationRecovery } from '@/lib/rehearsal-latency';
 import { AlertCircle, CarFront, Copy, Download, Settings, Theater } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -155,6 +155,7 @@ export default function RehearsalPage() {
   const hasVersionData = Boolean(latestVersion);
 
   const showSlowPreparationHint = isSlowPreparation(slowPreparationSeconds * 1000);
+  const showPreparationRecoveryAction = shouldOfferPreparationRecovery(slowPreparationSeconds * 1000);
 
   useEffect(() => {
     localStorage.setItem(
@@ -661,6 +662,16 @@ export default function RehearsalPage() {
     }
   }, [addDebugLog, script, selectedCharacter]);
 
+  const handleRecoverPreparation = useCallback(() => {
+    const idx = currentLineIndexRef.current;
+    if (idx < 0) {
+      return;
+    }
+
+    addDebugLog('Manual Preparation Retry', `Retrying line ${idx + 1}`);
+    void processLine(idx);
+  }, [addDebugLog, processLine]);
+
   const handleToggleSetup = useCallback(() => {
     setShowSetup(prev => !prev);
   }, []);
@@ -909,6 +920,7 @@ export default function RehearsalPage() {
               onReplayExpectedLine={handleReplayExpectedLine}
               onRetryLine={handleRetryLine}
               onSkipLine={handleSkipLine}
+              onRecoverPreparation={handleRecoverPreparation}
               hasStarted={hasStarted}
               isComplete={isComplete}
               carMode={carMode}
@@ -917,6 +929,7 @@ export default function RehearsalPage() {
               disabled={!hasApiKey || !selectedCharacter}
               showSlowPreparationHint={showSlowPreparationHint}
               slowPreparationSeconds={slowPreparationSeconds}
+              showPreparationRecoveryAction={showPreparationRecoveryAction}
             />
           </div>
         </div>
