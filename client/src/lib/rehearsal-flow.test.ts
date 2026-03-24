@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { appendDebugLogEntry, createDebugLogEntry } from './debug-log';
+import { buildRehearsalLines, buildSkippedUserLine, needsRehearsalLineInitialization } from './rehearsal-flow';
 import { buildTranscriptionPrompt, getSpeakableText, normalizeScript } from './script-utils';
+import type { Script } from './types';
 import { calculateAccuracy, computeWordDiff } from './word-diff';
 
 test('e2e rehearsal flow normalizes script, builds prompt, and scores transcription robustly', () => {
@@ -77,4 +79,73 @@ test('e2e rehearsal flow strips nested stage directions before scoring', () => {
     { word: 'aspettare', status: 'correct' },
   ]);
   assert.equal(calculateAccuracy(diff), 100);
+});
+
+test('buildRehearsalLines marks user lines and initializes every line as pending', () => {
+  const script: Script = {
+    title: 'Finale',
+    lines: [
+      { character: 'Hamm', text: 'Parla' },
+      { character: 'Clov', text: 'Rispondi' },
+      { character: 'Hamm', text: 'Ancora' },
+    ],
+  };
+
+  const result = buildRehearsalLines(script, 'Hamm');
+
+  assert.deepEqual(result, [
+    { index: 0, character: 'Hamm', text: 'Parla', isUserLine: true, state: 'pending' },
+    { index: 1, character: 'Clov', text: 'Rispondi', isUserLine: false, state: 'pending' },
+    { index: 2, character: 'Hamm', text: 'Ancora', isUserLine: true, state: 'pending' },
+  ]);
+});
+
+test('needsRehearsalLineInitialization only returns true when script mapping is stale', () => {
+  const script: Script = {
+    title: 'Finale',
+    lines: [
+      { character: 'Hamm', text: 'Parla' },
+      { character: 'Clov', text: 'Rispondi' },
+    ],
+  };
+
+  const freshLines = buildRehearsalLines(script, 'Hamm');
+  assert.equal(needsRehearsalLineInitialization(freshLines, script, 'Hamm'), false);
+
+  const staleCharacterSelection = buildRehearsalLines(script, 'Clov');
+  assert.equal(needsRehearsalLineInitialization(staleCharacterSelection, script, 'Hamm'), true);
+
+  const staleText = [
+    freshLines[0],
+    { ...freshLines[1], text: 'Nuovo testo' },
+  ];
+  assert.equal(needsRehearsalLineInitialization(staleText, script, 'Hamm'), true);
+
+  assert.equal(needsRehearsalLineInitialization(freshLines.slice(0, 1), script, 'Hamm'), true);
+});
+
+test('buildSkippedUserLine keeps identity fields while forcing deterministic skipped result', () => {
+  const skipped = buildSkippedUserLine({
+    index: 4,
+    character: 'Hamm',
+    text: 'Io non posso continuare.',
+    isUserLine: true,
+    state: 'active',
+    spokenText: 'prova',
+    accuracy: 40,
+    correctionPlayed: true,
+    diff: [{ word: 'io', status: 'extra' }],
+  });
+
+  assert.deepEqual(skipped, {
+    index: 4,
+    character: 'Hamm',
+    text: 'Io non posso continuare.',
+    isUserLine: true,
+    state: 'completed',
+    spokenText: '',
+    diff: [],
+    accuracy: 0,
+    correctionPlayed: false,
+  });
 });
