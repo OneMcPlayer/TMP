@@ -39,6 +39,16 @@ npm install
 npm run dev
 ```
 
+## Quality Checks
+
+Run the full local validation suite (typecheck + unit tests + e2e tests + production build):
+
+```bash
+npm run test:full
+```
+
+You can also run checks individually with `npm run check`, `npm test`, `npm run test:e2e`, and `npm run build`.
+
 ## Production Build
 
 ```bash
