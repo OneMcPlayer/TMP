@@ -41,6 +41,7 @@ import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 
 const PREFERENCES_STORAGE_KEY = 'rehearsal_preferences';
+const TRACK_NAVIGATION_STATES: RehearsalState[] = ['waiting-for-user', 'showing-feedback'];
 
 const VOICE_MAP: Record<string, string> = {
   'CLOV': 'fable',
@@ -72,6 +73,49 @@ interface PracticePreferences {
   selectedCharacter: string | null;
   carMode: boolean;
   autoSpeakCorrections: boolean;
+}
+
+function resetLineProgress(
+  line: RehearsalLine,
+  state: RehearsalLine['state'],
+): RehearsalLine {
+  return {
+    ...line,
+    state,
+    spokenText: undefined,
+    diff: undefined,
+    accuracy: undefined,
+    correctionPlayed: false,
+  };
+}
+
+function completeLineForNavigation(line: RehearsalLine): RehearsalLine {
+  if (line.state === 'completed') {
+    return line;
+  }
+
+  return line.isUserLine ? buildSkippedUserLine(line) : resetLineProgress(line, 'completed');
+}
+
+function syncLinesToTarget(lines: RehearsalLine[], targetIndex: number): RehearsalLine[] {
+  return lines.map((line, index) => {
+    if (index < targetIndex) {
+      return completeLineForNavigation(line);
+    }
+
+    return resetLineProgress(line, 'pending');
+  });
+}
+
+function setMediaSessionActionHandler(
+  action: MediaSessionAction,
+  handler: MediaSessionActionHandler | null,
+) {
+  try {
+    navigator.mediaSession.setActionHandler(action, handler);
+  } catch {
+    // Some browsers expose mediaSession but not every action.
+  }
 }
 
 function loadPreferences(): PracticePreferences {
@@ -136,6 +180,7 @@ export default function RehearsalPage() {
   const rehearsalLinesRef = useRef<RehearsalLine[]>([]);
   const currentLineIndexRef = useRef(-1);
   const isStartingRef = useRef(false);
+  const rehearsalStateRef = useRef<RehearsalState>('idle');
 
   useEffect(() => {
     rehearsalLinesRef.current = rehearsalLines;
@@ -157,6 +202,10 @@ export default function RehearsalPage() {
 
   const showSlowPreparationHint = isSlowPreparation(slowPreparationSeconds * 1000);
   const showPreparationRecoveryAction = shouldOfferPreparationRecovery(slowPreparationSeconds * 1000);
+
+  useEffect(() => {
+    rehearsalStateRef.current = rehearsalState;
+  }, [rehearsalState]);
 
   useEffect(() => {
     localStorage.setItem(
@@ -269,6 +318,8 @@ export default function RehearsalPage() {
   const canRetryLine = Boolean(
     currentLine && currentLine.isUserLine && currentLine.state === 'completed',
   );
+  const canGoPrevious = currentLineIndex > 0;
+  const canGoNext = currentLineIndex >= 0 && rehearsalLines.length > 0;
 
   const speakExpectedLine = useCallback(
     async (lineIndex: number = currentLineIndexRef.current) => {
@@ -621,20 +672,64 @@ export default function RehearsalPage() {
     addDebugLog('Retry Line', `Line ${idx + 1}`);
   }, [addDebugLog]);
 
+  const navigateToLine = useCallback((
+    targetIndex: number,
+    direction: 'previous' | 'next',
+  ) => {
+    if (!TRACK_NAVIGATION_STATES.includes(rehearsalStateRef.current)) {
+      return;
+    }
+
+    const lines = rehearsalLinesRef.current;
+    if (targetIndex < 0 || targetIndex >= lines.length) {
+      return;
+    }
+
+    const nextLines = syncLinesToTarget(lines, targetIndex);
+
+    rehearsalLinesRef.current = nextLines;
+    currentLineIndexRef.current = targetIndex;
+    rehearsalStateRef.current = 'idle';
+
+    setIsComplete(false);
+    setRehearsalLines(nextLines);
+    setCurrentLineIndex(targetIndex);
+    setRehearsalState('idle');
+    addDebugLog(
+      direction === 'previous' ? 'Moved To Previous Line' : 'Moved To Next Line',
+      `Line ${targetIndex + 1}`,
+    );
+
+    void processLine(targetIndex);
+  }, [addDebugLog, processLine]);
+
+  const handlePrevious = useCallback(() => {
+    navigateToLine(currentLineIndexRef.current - 1, 'previous');
+  }, [navigateToLine]);
+
   const handleNext = useCallback(() => {
+    if (!TRACK_NAVIGATION_STATES.includes(rehearsalStateRef.current)) {
+      return;
+    }
+
     const idx = currentLineIndexRef.current;
     const lines = rehearsalLinesRef.current;
     const nextIndex = idx + 1;
     if (nextIndex < lines.length) {
-      setCurrentLineIndex(nextIndex);
-      addDebugLog('Moved To Next Line', `Line ${nextIndex + 1}`);
-      processLine(nextIndex);
+      navigateToLine(nextIndex, 'next');
     } else {
+      const completedLines = lines.map((line, index) =>
+        index <= idx ? completeLineForNavigation(line) : line,
+      );
+
+      rehearsalLinesRef.current = completedLines;
+      rehearsalStateRef.current = 'idle';
       addDebugLog('Rehearsal Complete', 'Reached end of script');
       setIsComplete(true);
+      setRehearsalLines(completedLines);
       setRehearsalState('idle');
     }
-  }, [addDebugLog, processLine]);
+  }, [addDebugLog, navigateToLine]);
 
   const handleSkipLine = useCallback(() => {
     const idx = currentLineIndexRef.current;
@@ -711,6 +806,53 @@ export default function RehearsalPage() {
     URL.revokeObjectURL(blobUrl);
     addDebugLog('Debug Logs Downloaded', fileName);
   }, [addDebugLog, debugLogText]);
+
+  useEffect(() => {
+    if (!('mediaSession' in navigator)) {
+      return;
+    }
+
+    if (!script || !carMode || !hasStarted || isComplete) {
+      navigator.mediaSession.metadata = null;
+      navigator.mediaSession.playbackState = 'none';
+      setMediaSessionActionHandler('nexttrack', null);
+      setMediaSessionActionHandler('previoustrack', null);
+      return;
+    }
+
+    if ('MediaMetadata' in window) {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: script.title,
+        artist: selectedCharacter ? `Practicing as ${selectedCharacter}` : 'Rehearsal Partner',
+        album: currentLine
+          ? `Line ${currentLine.index + 1}: ${currentLine.character}`
+          : 'Car mode rehearsal',
+      });
+    }
+
+    navigator.mediaSession.playbackState =
+      rehearsalState === 'playing-tts' || rehearsalState === 'playing-correction'
+        ? 'playing'
+        : 'paused';
+
+    setMediaSessionActionHandler('nexttrack', handleNext);
+    setMediaSessionActionHandler('previoustrack', handlePrevious);
+
+    return () => {
+      setMediaSessionActionHandler('nexttrack', null);
+      setMediaSessionActionHandler('previoustrack', null);
+    };
+  }, [
+    carMode,
+    currentLine,
+    handleNext,
+    handlePrevious,
+    hasStarted,
+    isComplete,
+    rehearsalState,
+    script,
+    selectedCharacter,
+  ]);
 
   if (loadError) {
     return (
@@ -917,6 +1059,7 @@ export default function RehearsalPage() {
               state={rehearsalState}
               onStartRecording={handleStartRecording}
               onStopRecording={handleStopRecording}
+              onPrevious={handlePrevious}
               onNext={handleNext}
               onStart={handleStart}
               onRestart={handleRestart}
@@ -929,6 +1072,8 @@ export default function RehearsalPage() {
               carMode={carMode}
               canReplayExpectedLine={canReplayExpectedLine}
               canRetryLine={canRetryLine}
+              canGoPrevious={canGoPrevious}
+              canGoNext={canGoNext}
               disabled={!hasApiKey || !selectedCharacter}
               showSlowPreparationHint={showSlowPreparationHint}
               slowPreparationSeconds={slowPreparationSeconds}

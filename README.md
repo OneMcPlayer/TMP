@@ -15,6 +15,8 @@ A browser-only rehearsal page for **Finale di partita** by Samuel Beckett. It is
 
 This is still a standard web page, so it does **not** have native Apple CarPlay integration or access to CarPlay-specific system UI. The included **car mode** is a browser-side layout and recording mode designed to be easier to use from your phone while connected in the car.
 
+On browsers that expose the Media Session API, car mode also listens for the car's **next track** and **previous track** controls so you can move line-by-line without touching the screen as often.
+
 ## Script Format
 
 The app supports either legacy `character`/`text` lines or `speaker`/`line` lines. The bundled script is already configured for **Finale di partita** in `client/public/script.json`.
