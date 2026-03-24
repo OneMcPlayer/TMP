@@ -16,6 +16,7 @@ import {
 } from '@/lib/openai';
 import { computeWordDiff, calculateAccuracy } from '@/lib/word-diff';
 import { buildTranscriptionPrompt, getSpeakableText, normalizeScript } from '@/lib/script-utils';
+import { startSessionTransition } from '@/lib/session-start';
 import {
   buildRehearsalLines,
   buildSkippedUserLine,
@@ -430,11 +431,15 @@ export default function RehearsalPage() {
       }
 
       addDebugLog('Session Started', `Character: ${selectedCharacter}`);
-      await primeAudioPlayback().catch(() => undefined);
-      setShowSetup(false);
-      setHasStarted(true);
-      setCurrentLineIndex(0);
-      void processLine(0);
+      await startSessionTransition({
+        setShowSetup,
+        setHasStarted,
+        setCurrentLineIndex,
+        primeAudioPlayback,
+        processFirstLine: () => {
+          void processLine(0);
+        },
+      });
     } finally {
       isStartingRef.current = false;
     }
