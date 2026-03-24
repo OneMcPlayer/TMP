@@ -30,6 +30,7 @@ import {
   type DebugLogEntry,
 } from '@/lib/debug-log';
 import { APP_VERSION, fetchLatestVersion, isUpdateAvailable } from '@/lib/version';
+import { isSlowPreparation } from '@/lib/rehearsal-latency';
 import { AlertCircle, CarFront, Copy, Download, Settings, Theater } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -129,6 +130,7 @@ export default function RehearsalPage() {
   const [latestVersion, setLatestVersion] = useState<string | null>(null);
   const [isCheckingVersion, setIsCheckingVersion] = useState(false);
   const [versionCheckedAt, setVersionCheckedAt] = useState<string | null>(null);
+  const [slowPreparationSeconds, setSlowPreparationSeconds] = useState(0);
 
   const rehearsalLinesRef = useRef<RehearsalLine[]>([]);
   const currentLineIndexRef = useRef(-1);
@@ -151,6 +153,8 @@ export default function RehearsalPage() {
   const debugLogText = serializeDebugLogEntries(debugLogEntries);
   const updateAvailable = isUpdateAvailable(APP_VERSION, latestVersion);
   const hasVersionData = Boolean(latestVersion);
+
+  const showSlowPreparationHint = isSlowPreparation(slowPreparationSeconds * 1000);
 
   useEffect(() => {
     localStorage.setItem(
@@ -201,6 +205,23 @@ export default function RehearsalPage() {
       setSelectedCharacter(availableCharacters[0]);
     }
   }, [script, selectedCharacter]);
+
+  useEffect(() => {
+    if (!hasStarted || isComplete || (rehearsalState !== 'idle' && rehearsalState !== 'processing')) {
+      setSlowPreparationSeconds(0);
+      return;
+    }
+
+    const startedAt = Date.now();
+    const intervalId = window.setInterval(() => {
+      const elapsedMs = Date.now() - startedAt;
+      setSlowPreparationSeconds(Math.floor(elapsedMs / 1000));
+    }, 1_000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [hasStarted, isComplete, rehearsalState]);
 
   const handleCheckVersion = useCallback(async () => {
     setIsCheckingVersion(true);
@@ -894,6 +915,8 @@ export default function RehearsalPage() {
               canReplayExpectedLine={canReplayExpectedLine}
               canRetryLine={canRetryLine}
               disabled={!hasApiKey || !selectedCharacter}
+              showSlowPreparationHint={showSlowPreparationHint}
+              slowPreparationSeconds={slowPreparationSeconds}
             />
           </div>
         </div>

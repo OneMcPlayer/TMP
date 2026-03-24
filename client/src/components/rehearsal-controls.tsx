@@ -29,6 +29,8 @@ interface RehearsalControlsProps {
   canReplayExpectedLine?: boolean;
   canRetryLine?: boolean;
   disabled?: boolean;
+  showSlowPreparationHint?: boolean;
+  slowPreparationSeconds?: number;
 }
 
 export function RehearsalControls({
@@ -47,6 +49,8 @@ export function RehearsalControls({
   canReplayExpectedLine = false,
   canRetryLine = false,
   disabled = false,
+  showSlowPreparationHint = false,
+  slowPreparationSeconds = 0,
 }: RehearsalControlsProps) {
   const actionButtonClass = carMode
     ? 'h-24 w-full rounded-3xl text-xl font-semibold shadow-lg'
@@ -208,7 +212,9 @@ export function RehearsalControls({
       {state === 'idle' && hasStarted && (
         <div className="text-muted-foreground flex items-center gap-2">
           <Loader2 className="w-4 h-4 animate-spin" />
-          Preparing next line...
+          {showSlowPreparationHint
+            ? `Preparing next line... (${slowPreparationSeconds}s so far, this can happen on mobile networks)`
+            : 'Preparing next line...'}
         </div>
       )}
     </div>
