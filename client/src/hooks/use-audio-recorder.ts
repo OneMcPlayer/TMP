@@ -14,6 +14,13 @@ interface UseAudioRecorderOptions {
   onSilenceTimeout?: () => void;
 }
 
+export function getPreferredAudioMimeType(
+  mediaRecorder: Pick<typeof MediaRecorder, 'isTypeSupported'>,
+): string | undefined {
+  const supportedMimeTypes = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'] as const;
+  return supportedMimeTypes.find((mimeType) => mediaRecorder.isTypeSupported(mimeType));
+}
+
 export function useAudioRecorder(
   options: UseAudioRecorderOptions = {},
 ): UseAudioRecorderReturn {
@@ -59,13 +66,10 @@ export function useAudioRecorder(
         } 
       });
 
-      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-        ? 'audio/webm;codecs=opus'
-        : MediaRecorder.isTypeSupported('audio/webm')
-        ? 'audio/webm'
-        : 'audio/mp4';
-
-      const mediaRecorder = new MediaRecorder(stream, { mimeType });
+      const mimeType = getPreferredAudioMimeType(MediaRecorder);
+      const mediaRecorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
       silenceTriggeredRef.current = false;
 
@@ -124,7 +128,7 @@ export function useAudioRecorder(
       setError(message);
       throw err;
     }
-  }, [options.carMode]);
+  }, [options.carMode, options.onSilenceTimeout, silenceTimeoutMs]);
 
   const stopRecording = useCallback(async (): Promise<Blob> => {
     return new Promise((resolve, reject) => {
