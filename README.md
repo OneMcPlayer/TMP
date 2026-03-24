@@ -46,13 +46,19 @@ npm run dev
 
 ## Quality Checks
 
-Run the full local validation suite (typecheck + unit tests + e2e tests + production build):
+Run the full local validation suite (typecheck + unit tests + scenario tests + real browser e2e + production build):
 
 ```bash
 npm run test:full
 ```
 
-You can also run checks individually with `npm run check`, `npm test`, `npm run test:e2e`, and `npm run build`.
+Browser e2e is powered by Playwright. Install Chromium once before the first run:
+
+```bash
+npx playwright install chromium
+```
+
+You can also run checks individually with `npm run check`, `npm test`, `npm run test:logic`, `npm run test:e2e`, and `npm run build`.
 
 ## Production Build
 

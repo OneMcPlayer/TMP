@@ -177,6 +177,11 @@ export default function RehearsalPage() {
     );
   }, []);
 
+  const updateRehearsalState = useCallback((nextState: RehearsalState) => {
+    rehearsalStateRef.current = nextState;
+    setRehearsalState(nextState);
+  }, []);
+
   const clearCarModeAutoStartTimeout = useCallback(() => {
     if (carModeAutoStartTimeoutRef.current !== null) {
       window.clearTimeout(carModeAutoStartTimeoutRef.current);
@@ -385,9 +390,9 @@ export default function RehearsalPage() {
       setCurrentLineIndex(-1);
       setHasStarted(false);
       setIsComplete(false);
-      setRehearsalState('idle');
+      updateRehearsalState('idle');
     }
-  }, [script, selectedCharacter]);
+  }, [script, selectedCharacter, updateRehearsalState]);
 
   const characters = script ? Array.from(new Set(script.lines.map(l => l.character))) : [];
   const completedLines = rehearsalLines.filter(l => l.state === 'completed').length;
@@ -414,11 +419,11 @@ export default function RehearsalPage() {
 
       const expectedText = getSpeakableText(line.text);
       if (!expectedText) {
-        setRehearsalState('showing-feedback');
+        updateRehearsalState('showing-feedback');
         return;
       }
 
-      setRehearsalState('playing-correction');
+      updateRehearsalState('playing-correction');
       addDebugLog('Playing Correction', `Line ${lineIndex + 1} (${line.character})`);
 
       try {
@@ -457,10 +462,10 @@ export default function RehearsalPage() {
           });
         }
       } finally {
-        setRehearsalState('showing-feedback');
+        updateRehearsalState('showing-feedback');
       }
     },
-    [addDebugLog, toast],
+    [addDebugLog, toast, updateRehearsalState],
   );
 
   const processLine = useCallback(async (lineIndex: number) => {
@@ -502,13 +507,13 @@ export default function RehearsalPage() {
       } else {
         addDebugLog('Rehearsal Complete', 'Reached end of script');
         setIsComplete(true);
-        setRehearsalState('idle');
+        updateRehearsalState('idle');
       }
       return;
     }
 
     if (!line.isUserLine) {
-      setRehearsalState('playing-tts');
+      updateRehearsalState('playing-tts');
       addDebugLog('Playing Partner Line', `Line ${lineIndex + 1} (${line.character})`);
       try {
         const audioBlob = await textToSpeech(speakableText, {
@@ -541,13 +546,13 @@ export default function RehearsalPage() {
       } else {
         addDebugLog('Rehearsal Complete', 'Reached end of script');
         setIsComplete(true);
-        setRehearsalState('idle');
+        updateRehearsalState('idle');
       }
     } else {
       addDebugLog('Waiting For User Line', `Line ${lineIndex + 1} (${line.character})`);
-      setRehearsalState('waiting-for-user');
+      updateRehearsalState('waiting-for-user');
     }
-  }, [addDebugLog, toast]);
+  }, [addDebugLog, toast, updateRehearsalState]);
 
   const handleStart = useCallback(async () => {
     if (isStartingRef.current) {
@@ -610,8 +615,7 @@ export default function RehearsalPage() {
         startRecording,
         primeAudioPlayback,
       });
-      rehearsalStateRef.current = 'recording';
-      setRehearsalState('recording');
+      updateRehearsalState('recording');
       addDebugLog('Recording Started');
     } catch (err) {
       addDebugLog(
@@ -631,7 +635,7 @@ export default function RehearsalPage() {
       return;
     }
     isStoppingRecordingRef.current = true;
-    setRehearsalState('processing');
+    updateRehearsalState('processing');
     addDebugLog('Recording Stopped', 'Processing user audio');
     
     try {
@@ -672,7 +676,7 @@ export default function RehearsalPage() {
         addDebugLog('Auto Correction Triggered', `Line ${idx + 1}`);
         await speakExpectedLine(idx);
       } else {
-        setRehearsalState('showing-feedback');
+        updateRehearsalState('showing-feedback');
       }
     } catch (err) {
       addDebugLog(
@@ -684,7 +688,7 @@ export default function RehearsalPage() {
         title: 'Transcription Error',
         description: err instanceof Error ? err.message : 'Failed to transcribe audio',
       });
-      setRehearsalState('waiting-for-user');
+      updateRehearsalState('waiting-for-user');
     } finally {
       isStoppingRecordingRef.current = false;
     }
@@ -696,6 +700,7 @@ export default function RehearsalPage() {
     speakExpectedLine,
     stopRecording,
     toast,
+    updateRehearsalState,
   ]);
 
   useEffect(() => {
@@ -783,10 +788,9 @@ export default function RehearsalPage() {
           : line,
       ),
     );
-    rehearsalStateRef.current = 'waiting-for-user';
-    setRehearsalState('waiting-for-user');
+    updateRehearsalState('waiting-for-user');
     addDebugLog('Retry Line', `Line ${idx + 1}`);
-  }, [addDebugLog]);
+  }, [addDebugLog, updateRehearsalState]);
 
   const navigateToLine = useCallback((
     targetIndex: number,
@@ -812,14 +816,14 @@ export default function RehearsalPage() {
     setIsComplete(false);
     setRehearsalLines(nextLines);
     setCurrentLineIndex(targetIndex);
-    setRehearsalState('idle');
+    updateRehearsalState('idle');
     addDebugLog(
       direction === 'previous' ? 'Moved To Previous Line' : 'Moved To Next Line',
       `Line ${targetIndex + 1}`,
     );
 
     void processLine(targetIndex);
-  }, [addDebugLog, clearCarModeAutoStartTimeout, processLine]);
+  }, [addDebugLog, clearCarModeAutoStartTimeout, processLine, updateRehearsalState]);
 
   const handlePrevious = useCallback(() => {
     navigateToLine(currentLineIndexRef.current - 1, 'previous');
@@ -841,13 +845,12 @@ export default function RehearsalPage() {
       const completedLines = buildNavigationTargetLines(lines, lines.length);
 
       rehearsalLinesRef.current = completedLines;
-      rehearsalStateRef.current = 'idle';
       addDebugLog('Rehearsal Complete', 'Reached end of script');
       setIsComplete(true);
       setRehearsalLines(completedLines);
-      setRehearsalState('idle');
+      updateRehearsalState('idle');
     }
-  }, [addDebugLog, clearCarModeAutoStartTimeout, navigateToLine]);
+  }, [addDebugLog, clearCarModeAutoStartTimeout, navigateToLine, updateRehearsalState]);
 
   const handleSkipLine = useCallback(() => {
     const idx = currentLineIndexRef.current;
@@ -864,9 +867,8 @@ export default function RehearsalPage() {
       ),
     );
     addDebugLog('Line Skipped', `Line ${idx + 1} (${line.character})`);
-    rehearsalStateRef.current = 'showing-feedback';
-    setRehearsalState('showing-feedback');
-  }, [addDebugLog, clearCarModeAutoStartTimeout]);
+    updateRehearsalState('showing-feedback');
+  }, [addDebugLog, clearCarModeAutoStartTimeout, updateRehearsalState]);
 
   const handleRestart = useCallback(() => {
     clearCarModeAutoStartTimeout();
@@ -878,10 +880,9 @@ export default function RehearsalPage() {
       setCurrentLineIndex(-1);
       setHasStarted(false);
       setIsComplete(false);
-      rehearsalStateRef.current = 'idle';
-      setRehearsalState('idle');
+      updateRehearsalState('idle');
     }
-  }, [addDebugLog, clearCarModeAutoStartTimeout, script, selectedCharacter]);
+  }, [addDebugLog, clearCarModeAutoStartTimeout, script, selectedCharacter, updateRehearsalState]);
 
   const handleRecoverPreparation = useCallback(() => {
     const idx = currentLineIndexRef.current;
