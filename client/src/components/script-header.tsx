@@ -1,5 +1,7 @@
 import { Badge } from '@/components/ui/badge';
-import { CarFront, Clapperboard, FileText, Volume2 } from 'lucide-react';
+import { CarFront, Clapperboard, FileText, Smartphone, Volume2 } from 'lucide-react';
+
+type WakeLockStatus = 'active' | 'requesting' | 'inactive' | 'unavailable' | 'error';
 
 interface ScriptHeaderProps {
   title: string;
@@ -9,6 +11,8 @@ interface ScriptHeaderProps {
   userCharacter: string | null;
   carMode?: boolean;
   autoSpeakCorrections?: boolean;
+  wakeLockStatus?: WakeLockStatus;
+  showWakeLockStatus?: boolean;
 }
 
 export function ScriptHeader({
@@ -19,8 +23,30 @@ export function ScriptHeader({
   userCharacter,
   carMode = false,
   autoSpeakCorrections = false,
+  wakeLockStatus = 'inactive',
+  showWakeLockStatus = false,
 }: ScriptHeaderProps) {
   const progress = totalLines > 0 ? Math.round((completedLines / totalLines) * 100) : 0;
+  const wakeLockBadge = showWakeLockStatus
+    ? wakeLockStatus === 'active'
+      ? {
+          label: 'Screen awake',
+          className:
+            'text-xs border-emerald-500/30 text-emerald-700 dark:text-emerald-300',
+        }
+      : wakeLockStatus === 'requesting'
+      ? {
+          label: 'Waking screen',
+          className: 'text-xs border-primary/30 text-primary',
+        }
+      : wakeLockStatus === 'unavailable' || wakeLockStatus === 'error'
+      ? {
+          label: 'Keep phone unlocked',
+          className:
+            'text-xs border-amber-500/30 text-amber-700 dark:text-amber-300',
+        }
+      : null
+    : null;
 
   return (
     <div className="p-4 border-b border-border bg-card/50">
@@ -54,6 +80,12 @@ export function ScriptHeader({
                 <Badge variant="outline" className="text-xs">
                   <Volume2 className="w-3 h-3 mr-1" />
                   Spoken corrections
+                </Badge>
+              )}
+              {wakeLockBadge && (
+                <Badge variant="outline" className={wakeLockBadge.className}>
+                  <Smartphone className="w-3 h-3 mr-1" />
+                  {wakeLockBadge.label}
                 </Badge>
               )}
             </div>

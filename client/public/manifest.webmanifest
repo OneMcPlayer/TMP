@@ -1,0 +1,32 @@
+{
+  "name": "Finale di partita Rehearsal Partner",
+  "short_name": "Rehearsal",
+  "description": "Practice Finale di partita with an AI scene partner, speech recognition, spoken corrections, and a car-friendly mode.",
+  "lang": "it",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f7f3ef",
+  "theme_color": "#c74f23",
+  "icons": [
+    {
+      "src": "./favicon.png",
+      "sizes": "128x128",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./app-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "./app-icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

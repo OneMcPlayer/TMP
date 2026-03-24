@@ -19,6 +19,7 @@ import { buildTranscriptionPrompt, getSpeakableText, normalizeScript } from '@/l
 import { startSessionTransition } from '@/lib/session-start';
 import { startRecordingTransition } from '@/lib/recording-start';
 import {
+  buildNavigationTargetLines,
   buildRehearsalLines,
   buildSkippedUserLine,
   needsRehearsalLineInitialization,
@@ -42,6 +43,7 @@ import { Textarea } from '@/components/ui/textarea';
 
 const PREFERENCES_STORAGE_KEY = 'rehearsal_preferences';
 const TRACK_NAVIGATION_STATES: RehearsalState[] = ['waiting-for-user', 'showing-feedback'];
+const CAR_MODE_AUTO_START_DELAY_MS = 1000;
 
 const VOICE_MAP: Record<string, string> = {
   'CLOV': 'fable',
@@ -75,37 +77,13 @@ interface PracticePreferences {
   autoSpeakCorrections: boolean;
 }
 
-function resetLineProgress(
-  line: RehearsalLine,
-  state: RehearsalLine['state'],
-): RehearsalLine {
-  return {
-    ...line,
-    state,
-    spokenText: undefined,
-    diff: undefined,
-    accuracy: undefined,
-    correctionPlayed: false,
+type WakeLockStatus = 'active' | 'requesting' | 'inactive' | 'unavailable' | 'error';
+
+type NavigatorWithWakeLock = Navigator & {
+  wakeLock?: {
+    request: (type: 'screen') => Promise<WakeLockSentinel>;
   };
-}
-
-function completeLineForNavigation(line: RehearsalLine): RehearsalLine {
-  if (line.state === 'completed') {
-    return line;
-  }
-
-  return line.isUserLine ? buildSkippedUserLine(line) : resetLineProgress(line, 'completed');
-}
-
-function syncLinesToTarget(lines: RehearsalLine[], targetIndex: number): RehearsalLine[] {
-  return lines.map((line, index) => {
-    if (index < targetIndex) {
-      return completeLineForNavigation(line);
-    }
-
-    return resetLineProgress(line, 'pending');
-  });
-}
+};
 
 function setMediaSessionActionHandler(
   action: MediaSessionAction,
@@ -176,11 +154,14 @@ export default function RehearsalPage() {
   const [isCheckingVersion, setIsCheckingVersion] = useState(false);
   const [versionCheckedAt, setVersionCheckedAt] = useState<string | null>(null);
   const [slowPreparationSeconds, setSlowPreparationSeconds] = useState(0);
+  const [wakeLockStatus, setWakeLockStatus] = useState<WakeLockStatus>('inactive');
 
   const rehearsalLinesRef = useRef<RehearsalLine[]>([]);
   const currentLineIndexRef = useRef(-1);
   const isStartingRef = useRef(false);
   const rehearsalStateRef = useRef<RehearsalState>('idle');
+  const carModeAutoStartTimeoutRef = useRef<number | null>(null);
+  const wakeLockSentinelRef = useRef<WakeLockSentinel | null>(null);
 
   useEffect(() => {
     rehearsalLinesRef.current = rehearsalLines;
@@ -196,16 +177,119 @@ export default function RehearsalPage() {
     );
   }, []);
 
+  const clearCarModeAutoStartTimeout = useCallback(() => {
+    if (carModeAutoStartTimeoutRef.current !== null) {
+      window.clearTimeout(carModeAutoStartTimeoutRef.current);
+      carModeAutoStartTimeoutRef.current = null;
+    }
+  }, []);
+
   const debugLogText = serializeDebugLogEntries(debugLogEntries);
   const updateAvailable = isUpdateAvailable(APP_VERSION, latestVersion);
   const hasVersionData = Boolean(latestVersion);
 
   const showSlowPreparationHint = isSlowPreparation(slowPreparationSeconds * 1000);
   const showPreparationRecoveryAction = shouldOfferPreparationRecovery(slowPreparationSeconds * 1000);
+  const shouldKeepScreenAwake = carMode && hasStarted && !isComplete;
+
+  const releaseWakeLock = useCallback(async () => {
+    const currentWakeLock = wakeLockSentinelRef.current;
+    wakeLockSentinelRef.current = null;
+
+    if (!currentWakeLock) {
+      return;
+    }
+
+    try {
+      await currentWakeLock.release();
+    } catch {
+      // Wake lock release can fail if the browser already released it.
+    }
+  }, []);
 
   useEffect(() => {
     rehearsalStateRef.current = rehearsalState;
   }, [rehearsalState]);
+
+  useEffect(() => {
+    const wakeLockApi = (navigator as NavigatorWithWakeLock).wakeLock;
+
+    if (!carMode) {
+      setWakeLockStatus('inactive');
+      void releaseWakeLock();
+      return;
+    }
+
+    if (!wakeLockApi) {
+      setWakeLockStatus('unavailable');
+      return;
+    }
+
+    if (!shouldKeepScreenAwake) {
+      setWakeLockStatus('inactive');
+      void releaseWakeLock();
+      return;
+    }
+
+    let cancelled = false;
+
+    const requestWakeLock = async () => {
+      if (document.visibilityState !== 'visible') {
+        setWakeLockStatus('inactive');
+        return;
+      }
+
+      const activeWakeLock = wakeLockSentinelRef.current;
+      if (activeWakeLock && !activeWakeLock.released) {
+        setWakeLockStatus('active');
+        return;
+      }
+
+      setWakeLockStatus('requesting');
+
+      try {
+        const wakeLockSentinel = await wakeLockApi.request('screen');
+
+        if (cancelled) {
+          await wakeLockSentinel.release().catch(() => undefined);
+          return;
+        }
+
+        wakeLockSentinelRef.current = wakeLockSentinel;
+        wakeLockSentinel.addEventListener('release', () => {
+          if (wakeLockSentinelRef.current === wakeLockSentinel) {
+            wakeLockSentinelRef.current = null;
+          }
+
+          if (!cancelled && shouldKeepScreenAwake) {
+            setWakeLockStatus('inactive');
+          }
+        });
+        setWakeLockStatus('active');
+      } catch (err) {
+        addDebugLog(
+          'Wake Lock Error',
+          err instanceof Error ? err.message : 'Unable to keep the screen awake',
+        );
+        setWakeLockStatus('error');
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        void requestWakeLock();
+      }
+    };
+
+    void requestWakeLock();
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      cancelled = true;
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      void releaseWakeLock();
+    };
+  }, [addDebugLog, carMode, releaseWakeLock, shouldKeepScreenAwake]);
 
   useEffect(() => {
     localStorage.setItem(
@@ -521,10 +605,12 @@ export default function RehearsalPage() {
 
   const handleStartRecording = useCallback(async () => {
     try {
+      clearCarModeAutoStartTimeout();
       await startRecordingTransition({
         startRecording,
         primeAudioPlayback,
       });
+      rehearsalStateRef.current = 'recording';
       setRehearsalState('recording');
       addDebugLog('Recording Started');
     } catch (err) {
@@ -538,7 +624,7 @@ export default function RehearsalPage() {
         description: 'Please allow microphone access to record your lines',
       });
     }
-  }, [addDebugLog, primeAudioPlayback, startRecording, toast]);
+  }, [addDebugLog, clearCarModeAutoStartTimeout, primeAudioPlayback, startRecording, toast]);
 
   const handleStopRecording = useCallback(async () => {
     if (isStoppingRecordingRef.current) {
@@ -624,6 +710,8 @@ export default function RehearsalPage() {
   }, [addDebugLog, carMode, handleStopRecording, isRecording]);
 
   useEffect(() => {
+    clearCarModeAutoStartTimeout();
+
     if (
       !carMode ||
       !hasStarted ||
@@ -636,12 +724,39 @@ export default function RehearsalPage() {
       return;
     }
 
-    isAutoStartingRecordingRef.current = true;
-    addDebugLog('Car Mode Auto-Start', 'Automatically restarting recording');
-    void handleStartRecording().finally(() => {
-      isAutoStartingRecordingRef.current = false;
-    });
-  }, [addDebugLog, carMode, handleStartRecording, hasStarted, isComplete, isRecording, rehearsalState]);
+    carModeAutoStartTimeoutRef.current = window.setTimeout(() => {
+      carModeAutoStartTimeoutRef.current = null;
+
+      if (
+        rehearsalStateRef.current !== 'waiting-for-user' ||
+        isRecording ||
+        isAutoStartingRecordingRef.current ||
+        isStoppingRecordingRef.current
+      ) {
+        return;
+      }
+
+      isAutoStartingRecordingRef.current = true;
+      addDebugLog(
+        'Car Mode Auto-Start',
+        `Automatically restarting recording after ${CAR_MODE_AUTO_START_DELAY_MS}ms`,
+      );
+      void handleStartRecording().finally(() => {
+        isAutoStartingRecordingRef.current = false;
+      });
+    }, CAR_MODE_AUTO_START_DELAY_MS);
+
+    return clearCarModeAutoStartTimeout;
+  }, [
+    addDebugLog,
+    carMode,
+    clearCarModeAutoStartTimeout,
+    handleStartRecording,
+    hasStarted,
+    isComplete,
+    isRecording,
+    rehearsalState,
+  ]);
 
   const handleReplayExpectedLine = useCallback(async () => {
     await primeAudioPlayback().catch(() => undefined);
@@ -668,6 +783,7 @@ export default function RehearsalPage() {
           : line,
       ),
     );
+    rehearsalStateRef.current = 'waiting-for-user';
     setRehearsalState('waiting-for-user');
     addDebugLog('Retry Line', `Line ${idx + 1}`);
   }, [addDebugLog]);
@@ -685,7 +801,9 @@ export default function RehearsalPage() {
       return;
     }
 
-    const nextLines = syncLinesToTarget(lines, targetIndex);
+    clearCarModeAutoStartTimeout();
+
+    const nextLines = buildNavigationTargetLines(lines, targetIndex);
 
     rehearsalLinesRef.current = nextLines;
     currentLineIndexRef.current = targetIndex;
@@ -701,7 +819,7 @@ export default function RehearsalPage() {
     );
 
     void processLine(targetIndex);
-  }, [addDebugLog, processLine]);
+  }, [addDebugLog, clearCarModeAutoStartTimeout, processLine]);
 
   const handlePrevious = useCallback(() => {
     navigateToLine(currentLineIndexRef.current - 1, 'previous');
@@ -712,15 +830,15 @@ export default function RehearsalPage() {
       return;
     }
 
+    clearCarModeAutoStartTimeout();
+
     const idx = currentLineIndexRef.current;
     const lines = rehearsalLinesRef.current;
     const nextIndex = idx + 1;
     if (nextIndex < lines.length) {
       navigateToLine(nextIndex, 'next');
     } else {
-      const completedLines = lines.map((line, index) =>
-        index <= idx ? completeLineForNavigation(line) : line,
-      );
+      const completedLines = buildNavigationTargetLines(lines, lines.length);
 
       rehearsalLinesRef.current = completedLines;
       rehearsalStateRef.current = 'idle';
@@ -729,7 +847,7 @@ export default function RehearsalPage() {
       setRehearsalLines(completedLines);
       setRehearsalState('idle');
     }
-  }, [addDebugLog, navigateToLine]);
+  }, [addDebugLog, clearCarModeAutoStartTimeout, navigateToLine]);
 
   const handleSkipLine = useCallback(() => {
     const idx = currentLineIndexRef.current;
@@ -738,16 +856,20 @@ export default function RehearsalPage() {
       return;
     }
 
+    clearCarModeAutoStartTimeout();
+
     setRehearsalLines((previousLines) =>
       previousLines.map((rehearsalLine, index) =>
         index === idx ? buildSkippedUserLine(rehearsalLine) : rehearsalLine,
       ),
     );
     addDebugLog('Line Skipped', `Line ${idx + 1} (${line.character})`);
+    rehearsalStateRef.current = 'showing-feedback';
     setRehearsalState('showing-feedback');
-  }, [addDebugLog]);
+  }, [addDebugLog, clearCarModeAutoStartTimeout]);
 
   const handleRestart = useCallback(() => {
+    clearCarModeAutoStartTimeout();
     setShowSetup(true);
     addDebugLog('Session Restarted');
     if (script && selectedCharacter) {
@@ -756,9 +878,10 @@ export default function RehearsalPage() {
       setCurrentLineIndex(-1);
       setHasStarted(false);
       setIsComplete(false);
+      rehearsalStateRef.current = 'idle';
       setRehearsalState('idle');
     }
-  }, [addDebugLog, script, selectedCharacter]);
+  }, [addDebugLog, clearCarModeAutoStartTimeout, script, selectedCharacter]);
 
   const handleRecoverPreparation = useCallback(() => {
     const idx = currentLineIndexRef.current;
@@ -1046,6 +1169,8 @@ export default function RehearsalPage() {
           userCharacter={selectedCharacter}
           carMode={carMode}
           autoSpeakCorrections={autoSpeakCorrections}
+          wakeLockStatus={wakeLockStatus}
+          showWakeLockStatus={shouldKeepScreenAwake}
         />
 
         <RehearsalTimeline

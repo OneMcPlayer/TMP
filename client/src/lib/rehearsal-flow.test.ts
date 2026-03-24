@@ -2,7 +2,12 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { appendDebugLogEntry, createDebugLogEntry } from './debug-log';
-import { buildRehearsalLines, buildSkippedUserLine, needsRehearsalLineInitialization } from './rehearsal-flow';
+import {
+  buildNavigationTargetLines,
+  buildRehearsalLines,
+  buildSkippedUserLine,
+  needsRehearsalLineInitialization,
+} from './rehearsal-flow';
 import { buildTranscriptionPrompt, getSpeakableText, normalizeScript } from './script-utils';
 import type { Script } from './types';
 import { calculateAccuracy, computeWordDiff } from './word-diff';
@@ -148,4 +153,70 @@ test('buildSkippedUserLine keeps identity fields while forcing deterministic ski
     accuracy: 0,
     correctionPlayed: false,
   });
+});
+
+test('buildNavigationTargetLines keeps completed history and deterministically skips unfinished user lines', () => {
+  const lines = [
+    {
+      index: 0,
+      character: 'Hamm',
+      text: 'Gia fatta',
+      isUserLine: true,
+      state: 'completed' as const,
+      spokenText: 'Gia fatta',
+      diff: [{ word: 'gia', status: 'correct' as const }],
+      accuracy: 100,
+      correctionPlayed: false,
+    },
+    {
+      index: 1,
+      character: 'Clov',
+      text: 'Replica',
+      isUserLine: false,
+      state: 'completed' as const,
+    },
+    {
+      index: 2,
+      character: 'Hamm',
+      text: 'Saltata',
+      isUserLine: true,
+      state: 'active' as const,
+    },
+    {
+      index: 3,
+      character: 'Clov',
+      text: 'Obiettivo',
+      isUserLine: false,
+      state: 'completed' as const,
+    },
+  ];
+
+  const result = buildNavigationTargetLines(lines, 3);
+
+  assert.deepEqual(result, [
+    lines[0],
+    lines[1],
+    {
+      index: 2,
+      character: 'Hamm',
+      text: 'Saltata',
+      isUserLine: true,
+      state: 'completed',
+      spokenText: '',
+      diff: [],
+      accuracy: 0,
+      correctionPlayed: false,
+    },
+    {
+      index: 3,
+      character: 'Clov',
+      text: 'Obiettivo',
+      isUserLine: false,
+      state: 'pending',
+      spokenText: undefined,
+      diff: undefined,
+      accuracy: undefined,
+      correctionPlayed: false,
+    },
+  ]);
 });

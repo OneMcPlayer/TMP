@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0%" x2="100%" y1="0%" y2="100%">
+      <stop offset="0%" stop-color="#f7efe6" />
+      <stop offset="100%" stop-color="#ead7c6" />
+    </linearGradient>
+    <linearGradient id="curtain" x1="0%" x2="100%" y1="0%" y2="0%">
+      <stop offset="0%" stop-color="#8f2e16" />
+      <stop offset="100%" stop-color="#c74f23" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)" />
+  <path d="M96 112c35 0 64 29 64 64v160c0 35-29 64-64 64V112Zm256 0c35 0 64 29 64 64v160c0 35-29 64-64 64V112Z" fill="url(#curtain)" opacity="0.96" />
+  <path d="M160 96h192c0 83-43 129-96 165-53-36-96-82-96-165Z" fill="#d86d3d" />
+  <path d="M168 96h176c0 54-17 98-44 132-17 22-34 37-44 45-10-8-27-23-44-45-27-34-44-78-44-132Z" fill="#f6ede2" />
+  <rect x="136" y="328" width="240" height="96" rx="28" fill="#201410" opacity="0.92" />
+  <path d="M192 352h128c-8 37-32 56-64 72-32-16-56-35-64-72Z" fill="#f0b55a" />
+  <circle cx="214" cy="186" r="10" fill="#f6ede2" opacity="0.7" />
+  <circle cx="298" cy="154" r="8" fill="#f6ede2" opacity="0.7" />
+  <circle cx="324" cy="222" r="9" fill="#f6ede2" opacity="0.7" />
+</svg>

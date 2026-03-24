@@ -10,12 +10,15 @@ A browser-only rehearsal page for **Finale di partita** by Samuel Beckett. It is
 - Correction rules that ignore punctuation and anything inside parentheses
 - Optional spoken correction playback when your line is wrong
 - Larger-control **car mode** for quick phone use
+- Installable **PWA** shell for home-screen use
+- Car-mode **screen wake lock** when the browser supports it
 
 ## Car Mode Note
 
 This is still a standard web page, so it does **not** have native Apple CarPlay integration or access to CarPlay-specific system UI. The included **car mode** is a browser-side layout and recording mode designed to be easier to use from your phone while connected in the car.
 
 On browsers that expose the Media Session API, car mode also listens for the car's **next track** and **previous track** controls so you can move line-by-line without touching the screen as often.
+On browsers that expose the Screen Wake Lock API, car mode also tries to keep the phone screen awake while rehearsal is active. If wake lock is unavailable, keep the phone unlocked and connected to power for the most reliable experience.
 
 ## Script Format
 
