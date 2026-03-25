@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test';
 
 import {
   CAR_MODE_SCRIPT,
+  completeDeviceSetup,
   PARTNER_LEAD_SCRIPT,
   selectCharacter,
   setupRehearsalApp,
@@ -17,6 +18,7 @@ test.describe('rehearsal browser e2e', () => {
     });
 
     await expect(page.getByText('E2E Rehearsal')).toBeVisible();
+    await completeDeviceSetup(page);
     await selectCharacter(page, 'BOB');
     await page.getByTestId('button-start-rehearsal').click();
 

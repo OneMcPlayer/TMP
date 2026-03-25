@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
 
 export interface MockScriptLine {
   speaker: string;
@@ -325,6 +325,17 @@ export async function setupRehearsalApp(
   });
 
   await page.goto('/');
+}
+
+export async function completeDeviceSetup(page: Page): Promise<void> {
+  const prepareButton = page.getByTestId('button-prepare-device');
+
+  if (!(await prepareButton.isVisible().catch(() => false))) {
+    return;
+  }
+
+  await prepareButton.click();
+  await expect(prepareButton).toBeHidden();
 }
 
 export async function selectCharacter(page: Page, character: string): Promise<void> {
