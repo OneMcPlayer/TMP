@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import { ApiKeyInput } from '@/components/api-key-input';
 import { CharacterSelector } from '@/components/character-selector';
+import { DeviceSetupScreen } from '@/components/device-setup-screen';
 import { RehearsalTimeline } from '@/components/rehearsal-timeline';
 import { RehearsalControls } from '@/components/rehearsal-controls';
 import { ScriptHeader } from '@/components/script-header';
@@ -9,6 +10,7 @@ import { ThemeToggle } from '@/components/theme-toggle';
 import {
   NO_AUDIO_CAPTURED_ERROR,
   NO_SPEECH_DETECTED_ERROR,
+  prepareMicrophoneAccess,
   useAudioRecorder,
 } from '@/hooks/use-audio-recorder';
 import {
@@ -43,6 +45,7 @@ import {
 } from '@/lib/pwa-debug';
 import { APP_VERSION, buildUpdateReloadUrl, fetchLatestVersion, isUpdateAvailable } from '@/lib/version';
 import { isSlowPreparation, shouldOfferPreparationRecovery } from '@/lib/rehearsal-latency';
+import { prepareDeviceForRehearsal } from '@/lib/device-setup';
 import { AlertCircle, CarFront, Copy, Download, RefreshCw, Settings, Smartphone, Theater } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -86,6 +89,8 @@ interface PracticePreferences {
   carMode: boolean;
   autoSpeakCorrections: boolean;
 }
+
+type DeviceSetupStatus = 'idle' | 'pending' | 'ready' | 'error';
 
 type WakeLockStatus = 'active' | 'requesting' | 'inactive' | 'unavailable' | 'error';
 
@@ -131,6 +136,14 @@ function loadPreferences(): PracticePreferences {
   }
 }
 
+function getPreparationErrorMessage(error: unknown, fallbackMessage: string): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+
+  return fallbackMessage;
+}
+
 export default function RehearsalPage() {
   const { toast } = useToast();
   const initialPreferences = useRef<PracticePreferences>(loadPreferences());
@@ -159,6 +172,12 @@ export default function RehearsalPage() {
   const [hasStarted, setHasStarted] = useState(false);
   const [isComplete, setIsComplete] = useState(false);
   const [showSetup, setShowSetup] = useState(true);
+  const [hasCompletedDeviceSetup, setHasCompletedDeviceSetup] = useState(false);
+  const [isPreparingDevice, setIsPreparingDevice] = useState(false);
+  const [microphoneSetupStatus, setMicrophoneSetupStatus] = useState<DeviceSetupStatus>('idle');
+  const [microphoneSetupMessage, setMicrophoneSetupMessage] = useState<string | null>(null);
+  const [playbackSetupStatus, setPlaybackSetupStatus] = useState<DeviceSetupStatus>('idle');
+  const [playbackSetupMessage, setPlaybackSetupMessage] = useState<string | null>(null);
   const [debugLogEntries, setDebugLogEntries] = useState<DebugLogEntry[]>([]);
   const [latestVersion, setLatestVersion] = useState<string | null>(null);
   const [isCheckingVersion, setIsCheckingVersion] = useState(false);
@@ -213,6 +232,7 @@ export default function RehearsalPage() {
   const showSlowPreparationHint = isSlowPreparation(slowPreparationSeconds * 1000);
   const showPreparationRecoveryAction = shouldOfferPreparationRecovery(slowPreparationSeconds * 1000);
   const shouldKeepScreenAwake = carMode && hasStarted && !isComplete;
+  const shouldShowFirstSetupScreen = showSetup && !hasStarted && !hasCompletedDeviceSetup;
 
   const releaseWakeLock = useCallback(async () => {
     const currentWakeLock = wakeLockSentinelRef.current;
@@ -681,6 +701,68 @@ export default function RehearsalPage() {
       isStartingRef.current = false;
     }
   }, [addDebugLog, hasApiKey, processLine, rehearsalLinesRef, script, selectedCharacter, toast]);
+
+  const handlePrepareDevice = useCallback(async () => {
+    if (isPreparingDevice) {
+      return;
+    }
+
+    setIsPreparingDevice(true);
+    setMicrophoneSetupStatus('pending');
+    setMicrophoneSetupMessage(null);
+    setPlaybackSetupStatus('pending');
+    setPlaybackSetupMessage(null);
+    addDebugLog('Device Setup Started', `Car mode: ${carMode ? 'on' : 'off'}`);
+
+    try {
+      const result = await prepareDeviceForRehearsal({
+        primeAudioPlayback,
+        prepareMicrophone: () => prepareMicrophoneAccess(navigator.mediaDevices, carMode),
+        onPlaybackReady: () => {
+          setPlaybackSetupStatus('ready');
+          addDebugLog('Playback Ready', 'Audio playback primed before rehearsal');
+        },
+        onPlaybackError: (error) => {
+          const message = getPreparationErrorMessage(
+            error,
+            'Audio playback could not be prepared',
+          );
+          setPlaybackSetupStatus('error');
+          setPlaybackSetupMessage(message);
+          addDebugLog('Playback Prep Error', message);
+        },
+        onMicrophoneReady: () => {
+          setMicrophoneSetupStatus('ready');
+          addDebugLog('Microphone Ready', 'Microphone permission granted before rehearsal');
+        },
+        onMicrophoneError: (error) => {
+          const message = getPreparationErrorMessage(
+            error,
+            'Microphone access could not be prepared',
+          );
+          setMicrophoneSetupStatus('error');
+          setMicrophoneSetupMessage(message);
+          addDebugLog('Microphone Prep Error', message);
+        },
+      });
+
+      if (result.playbackReady && result.microphoneReady) {
+        setHasCompletedDeviceSetup(true);
+        toast({
+          title: 'Device Ready',
+          description: 'Microphone and playback are prepared for a smoother rehearsal start.',
+        });
+      } else {
+        toast({
+          variant: 'destructive',
+          title: 'Device Setup Incomplete',
+          description: 'Check the messages on screen, then run the preparation step again.',
+        });
+      }
+    } finally {
+      setIsPreparingDevice(false);
+    }
+  }, [addDebugLog, carMode, isPreparingDevice, toast]);
 
   const handleStartRecording = useCallback(async () => {
     if (
@@ -1179,8 +1261,30 @@ export default function RehearsalPage() {
       </header>
 
       <main className="flex-1 flex flex-col min-h-0 max-w-4xl mx-auto w-full">
-        {showSetup && (
+        {shouldShowFirstSetupScreen && (
+          <DeviceSetupScreen
+            isPreparing={isPreparingDevice}
+            microphoneStatus={microphoneSetupStatus}
+            microphoneMessage={microphoneSetupMessage}
+            playbackStatus={playbackSetupStatus}
+            playbackMessage={playbackSetupMessage}
+            onPrepare={() => {
+              void handlePrepareDevice();
+            }}
+          />
+        )}
+
+        {showSetup && !shouldShowFirstSetupScreen && (
           <div className="p-4 space-y-4">
+            {hasCompletedDeviceSetup && !hasStarted && (
+              <Alert>
+                <AlertCircle className="h-4 w-4" />
+                <AlertTitle>Device Ready</AlertTitle>
+                <AlertDescription>
+                  Microphone access and audio playback have already been prepared for this session.
+                </AlertDescription>
+              </Alert>
+            )}
             <div className="grid gap-4 md:grid-cols-3">
               <ApiKeyInput onKeyChange={setHasApiKey} />
               <CharacterSelector

@@ -17,6 +17,35 @@ interface UseAudioRecorderOptions {
 export const NO_SPEECH_DETECTED_ERROR = 'No speech detected before auto-stop';
 export const NO_AUDIO_CAPTURED_ERROR = 'No audio captured';
 
+export function buildRecordingAudioConstraints(carMode: boolean = false): MediaTrackConstraints {
+  const constraints: MediaTrackConstraints = {
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true,
+  };
+
+  if (carMode) {
+    constraints.channelCount = 1;
+  }
+
+  return constraints;
+}
+
+export async function prepareMicrophoneAccess(
+  mediaDevices: Pick<MediaDevices, 'getUserMedia'> | undefined,
+  carMode: boolean = false,
+): Promise<void> {
+  if (!mediaDevices?.getUserMedia) {
+    throw new Error('This browser does not support microphone access');
+  }
+
+  const stream = await mediaDevices.getUserMedia({
+    audio: buildRecordingAudioConstraints(carMode),
+  });
+
+  stream.getTracks().forEach((track) => track.stop());
+}
+
 export function getPreferredAudioMimeType(
   mediaRecorder: Pick<typeof MediaRecorder, 'isTypeSupported'>,
 ): string | undefined {
@@ -107,12 +136,7 @@ export function useAudioRecorder(
       silenceTriggeredRef.current = false;
 
       stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          channelCount: options.carMode ? 1 : undefined,
-        },
+        audio: buildRecordingAudioConstraints(options.carMode),
       });
       streamRef.current = stream;
 
