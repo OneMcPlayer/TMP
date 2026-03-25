@@ -34,6 +34,10 @@ class MockAudio {
     return this.attributes.get(name);
   }
 
+  load(): void {
+    // no-op in tests
+  }
+
   play(): Promise<void> {
     if (MockAudio.mode === 'reject') {
       return Promise.reject(new DOMException('Playback blocked', 'NotAllowedError'));
@@ -84,6 +88,7 @@ test('primeAudioPlayback succeeds and memoizes playback priming', async () => {
   const primingAudio = MockAudio.instances[0];
   assert.equal(primingAudio.preload, 'auto');
   assert.equal(primingAudio.getAttribute('playsinline'), '');
+  assert.equal(primingAudio.getAttribute('webkit-playsinline'), '');
   assert.equal(primingAudio.currentTime, 0);
 });
 
@@ -120,4 +125,5 @@ test('playAudioBlob sets inline playback attributes and resolves', async () => {
   assert.equal(playbackAudio.src, 'blob:mock');
   assert.equal(playbackAudio.preload, 'auto');
   assert.equal(playbackAudio.getAttribute('playsinline'), '');
+  assert.equal(playbackAudio.getAttribute('webkit-playsinline'), '');
 });
