@@ -194,6 +194,7 @@ export default function RehearsalPage() {
   const rehearsalStateRef = useRef<RehearsalState>('idle');
   const carModeAutoStartTimeoutRef = useRef<number | null>(null);
   const wakeLockSentinelRef = useRef<WakeLockSentinel | null>(null);
+  const correctionAudioCacheRef = useRef<Map<number, Blob>>(new Map());
 
   useEffect(() => {
     rehearsalLinesRef.current = rehearsalLines;
@@ -223,6 +224,10 @@ export default function RehearsalPage() {
       window.clearTimeout(carModeAutoStartTimeoutRef.current);
       carModeAutoStartTimeoutRef.current = null;
     }
+  }, []);
+
+  const clearCorrectionAudioCache = useCallback(() => {
+    correctionAudioCacheRef.current.clear();
   }, []);
 
   const debugLogText = serializeDebugLogEntries(debugLogEntries);
@@ -473,6 +478,7 @@ export default function RehearsalPage() {
 
   useEffect(() => {
     if (script && selectedCharacter) {
+      clearCorrectionAudioCache();
       const lines = buildRehearsalLines(script, selectedCharacter);
       setRehearsalLines(lines);
       setCurrentLineIndex(-1);
@@ -480,7 +486,7 @@ export default function RehearsalPage() {
       setIsComplete(false);
       updateRehearsalState('idle');
     }
-  }, [script, selectedCharacter, updateRehearsalState]);
+  }, [clearCorrectionAudioCache, script, selectedCharacter, updateRehearsalState]);
 
   const characters = script ? Array.from(new Set(script.lines.map(l => l.character))) : [];
   const completedLines = rehearsalLines.filter(l => l.state === 'completed').length;
@@ -515,9 +521,14 @@ export default function RehearsalPage() {
       addDebugLog('Playing Correction', `Line ${lineIndex + 1} (${line.character})`);
 
       try {
-        const audioBlob = await textToSpeech(expectedText, {
-          voice: getVoiceForCharacter(line.character),
-        });
+        let audioBlob = correctionAudioCacheRef.current.get(lineIndex);
+        if (!audioBlob) {
+          audioBlob = await textToSpeech(expectedText, {
+            voice: getVoiceForCharacter(line.character),
+          });
+          correctionAudioCacheRef.current.set(lineIndex, audioBlob);
+        }
+
         await playAudioBlob(audioBlob);
 
         setRehearsalLines((previousLines) =>
@@ -1088,6 +1099,7 @@ export default function RehearsalPage() {
 
   const handleRestart = useCallback(() => {
     clearCarModeAutoStartTimeout();
+    clearCorrectionAudioCache();
     setShowSetup(true);
     addDebugLog('Session Restarted');
     if (script && selectedCharacter) {
@@ -1098,7 +1110,14 @@ export default function RehearsalPage() {
       setIsComplete(false);
       updateRehearsalState('idle');
     }
-  }, [addDebugLog, clearCarModeAutoStartTimeout, script, selectedCharacter, updateRehearsalState]);
+  }, [
+    addDebugLog,
+    clearCarModeAutoStartTimeout,
+    clearCorrectionAudioCache,
+    script,
+    selectedCharacter,
+    updateRehearsalState,
+  ]);
 
   const handleRecoverPreparation = useCallback(() => {
     const idx = currentLineIndexRef.current;

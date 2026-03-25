@@ -24,6 +24,30 @@ const SILENT_WAV_DATA_URI =
   'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==';
 
 let playbackPrimingPromise: Promise<void> | null = null;
+let playbackAudioElement: HTMLAudioElement | null = null;
+let activePlaybackObjectUrl: string | null = null;
+
+function getPlaybackAudioElement(): HTMLAudioElement {
+  if (playbackAudioElement) {
+    return playbackAudioElement;
+  }
+
+  const audio = new Audio();
+  audio.preload = 'auto';
+  audio.setAttribute('playsinline', '');
+  audio.setAttribute('webkit-playsinline', '');
+  playbackAudioElement = audio;
+  return audio;
+}
+
+function clearActivePlaybackObjectUrl(nextObjectUrl?: string): void {
+  if (!activePlaybackObjectUrl || activePlaybackObjectUrl === nextObjectUrl) {
+    return;
+  }
+
+  URL.revokeObjectURL(activePlaybackObjectUrl);
+  activePlaybackObjectUrl = null;
+}
 
 export function getApiKey(): string | null {
   return localStorage.getItem(API_KEY_STORAGE_KEY);
@@ -199,6 +223,16 @@ export async function speechToText(
 
 export function __resetPlaybackPrimingForTests(): void {
   playbackPrimingPromise = null;
+  clearActivePlaybackObjectUrl();
+
+  if (playbackAudioElement) {
+    playbackAudioElement.pause();
+    playbackAudioElement.onended = null;
+    playbackAudioElement.onerror = null;
+    playbackAudioElement.src = '';
+  }
+
+  playbackAudioElement = null;
 }
 
 export function primeAudioPlayback(timeoutMs: number = PLAYBACK_PRIMING_TIMEOUT_MS): Promise<void> {
@@ -207,10 +241,12 @@ export function primeAudioPlayback(timeoutMs: number = PLAYBACK_PRIMING_TIMEOUT_
   }
 
   playbackPrimingPromise = (async () => {
-    const audio = new Audio(SILENT_WAV_DATA_URI);
-    audio.preload = 'auto';
-    audio.setAttribute('playsinline', '');
-    audio.setAttribute('webkit-playsinline', '');
+    const audio = getPlaybackAudioElement();
+    clearActivePlaybackObjectUrl();
+    audio.pause();
+    audio.onended = null;
+    audio.onerror = null;
+    audio.src = SILENT_WAV_DATA_URI;
     audio.load();
 
     try {
@@ -233,21 +269,53 @@ export function primeAudioPlayback(timeoutMs: number = PLAYBACK_PRIMING_TIMEOUT_
 export function playAudioBlob(blob: Blob): Promise<void> {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(blob);
-    const audio = new Audio(url);
-    audio.preload = 'auto';
-    audio.setAttribute('playsinline', '');
-    audio.setAttribute('webkit-playsinline', '');
+    const audio = getPlaybackAudioElement();
+    let settled = false;
+
+    clearActivePlaybackObjectUrl(url);
+    activePlaybackObjectUrl = url;
+    audio.pause();
+    audio.onended = null;
+    audio.onerror = null;
+    audio.src = url;
+    audio.load();
+
+    const finalize = (callback: () => void) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      audio.onended = null;
+      audio.onerror = null;
+
+      if (activePlaybackObjectUrl === url) {
+        clearActivePlaybackObjectUrl();
+      } else {
+        URL.revokeObjectURL(url);
+      }
+
+      callback();
+    };
 
     audio.onended = () => {
-      URL.revokeObjectURL(url);
-      resolve();
+      finalize(resolve);
     };
 
-    audio.onerror = (e) => {
-      URL.revokeObjectURL(url);
-      reject(new Error('Audio playback failed'));
+    audio.onerror = () => {
+      finalize(() => {
+        reject(new Error('Audio playback failed'));
+      });
     };
 
-    audio.play().catch(reject);
+    audio.play().catch((error) => {
+      if (isRetryableNetworkError(error) || (error instanceof DOMException && error.name === 'NotAllowedError')) {
+        playbackPrimingPromise = null;
+      }
+
+      finalize(() => {
+        reject(error);
+      });
+    });
   });
 }

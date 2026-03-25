@@ -19,6 +19,7 @@ class MockAudio {
   public currentTime = 5;
   public onended: (() => void) | null = null;
   public onerror: ((error?: unknown) => void) | null = null;
+  public playCalls = 0;
   private attributes = new Map<string, string>();
 
   constructor(src = '') {
@@ -39,6 +40,8 @@ class MockAudio {
   }
 
   play(): Promise<void> {
+    this.playCalls += 1;
+
     if (MockAudio.mode === 'reject') {
       return Promise.reject(new DOMException('Playback blocked', 'NotAllowedError'));
     }
@@ -114,7 +117,8 @@ test('primeAudioPlayback rejects when priming hangs past the timeout', async () 
   });
 
   await assert.rejects(() => primeAudioPlayback(10));
-  assert.equal(MockAudio.instances.length, 2);
+  assert.equal(MockAudio.instances.length, 1);
+  assert.equal(MockAudio.instances[0].playCalls, 2);
 });
 
 test('playAudioBlob sets inline playback attributes and resolves', async () => {
@@ -126,4 +130,29 @@ test('playAudioBlob sets inline playback attributes and resolves', async () => {
   assert.equal(playbackAudio.preload, 'auto');
   assert.equal(playbackAudio.getAttribute('playsinline'), '');
   assert.equal(playbackAudio.getAttribute('webkit-playsinline'), '');
+});
+
+test('playAudioBlob reuses the primed audio element', async () => {
+  await primeAudioPlayback();
+  await playAudioBlob(new Blob(['audio']));
+
+  assert.equal(MockAudio.instances.length, 1);
+  assert.equal(MockAudio.instances[0].playCalls, 2);
+});
+
+test('playAudioBlob clears priming so a user gesture can re-prime after autoplay is blocked', async () => {
+  await primeAudioPlayback();
+
+  MockAudio.mode = 'reject';
+  await assert.rejects(() => playAudioBlob(new Blob(['audio'])), (error: unknown) => {
+    assert.ok(error instanceof DOMException);
+    assert.equal(error.name, 'NotAllowedError');
+    return true;
+  });
+
+  MockAudio.mode = 'resolve';
+  await primeAudioPlayback();
+
+  assert.equal(MockAudio.instances.length, 1);
+  assert.equal(MockAudio.instances[0].playCalls, 3);
 });
