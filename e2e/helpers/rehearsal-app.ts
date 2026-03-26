@@ -98,6 +98,11 @@ export async function setupRehearsalApp(
         writable: true,
         value: 0,
       });
+      Object.defineProperty(window, '__e2eAudioSessionTypes', {
+        configurable: true,
+        writable: true,
+        value: [] as string[],
+      });
 
       const mediaSession = {
         metadata: null,
@@ -109,6 +114,25 @@ export async function setupRehearsalApp(
       Object.defineProperty(navigator, 'mediaSession', {
         configurable: true,
         value: mediaSession,
+      });
+
+      class FakeAudioSession extends EventTarget {
+        state = 'active';
+        privateType = 'auto';
+
+        get type() {
+          return this.privateType;
+        }
+
+        set type(nextType: string) {
+          this.privateType = nextType;
+          window.__e2eAudioSessionTypes.push(nextType);
+        }
+      }
+
+      Object.defineProperty(navigator, 'audioSession', {
+        configurable: true,
+        value: new FakeAudioSession(),
       });
 
       class FakeMediaMetadata {
@@ -329,11 +353,7 @@ export async function setupRehearsalApp(
 
 export async function completeDeviceSetup(page: Page): Promise<void> {
   const prepareButton = page.getByTestId('button-prepare-device');
-
-  if (!(await prepareButton.isVisible().catch(() => false))) {
-    return;
-  }
-
+  await expect(prepareButton).toBeVisible();
   await prepareButton.click();
   await expect(prepareButton).toBeHidden();
 }

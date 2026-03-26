@@ -33,6 +33,7 @@ export function RehearsalTimeline({ lines, currentLineIndex }: RehearsalTimeline
   }
 
   return (
+    // Keep timeline sizing unchanged until we revisit the narrow-screen overflow issue.
     <ScrollArea className="flex-1 min-h-0" ref={scrollRef}>
       <div className="space-y-3 p-4">
         {visibleLines.map((line) => (

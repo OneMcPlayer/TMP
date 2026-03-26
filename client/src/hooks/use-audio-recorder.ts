@@ -1,8 +1,10 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { calculateAudioLevel, isSilentAudioLevel } from '@/lib/silence-detection';
 
 interface UseAudioRecorderReturn {
   isRecording: boolean;
+  prepareRecordingSession: () => Promise<void>;
+  releasePreparedRecordingSession: () => void;
   startRecording: () => Promise<boolean>;
   stopRecording: () => Promise<Blob>;
   error: string | null;
@@ -16,6 +18,16 @@ interface UseAudioRecorderOptions {
 
 export const NO_SPEECH_DETECTED_ERROR = 'No speech detected before auto-stop';
 export const NO_AUDIO_CAPTURED_ERROR = 'No audio captured';
+
+export function hasLiveAudioTracks(
+  stream: Pick<MediaStream, 'getTracks'> | null | undefined,
+): boolean {
+  if (!stream) {
+    return false;
+  }
+
+  return stream.getTracks().some((track) => track.readyState !== 'ended');
+}
 
 export function buildRecordingAudioConstraints(carMode: boolean = false): MediaTrackConstraints {
   const constraints: MediaTrackConstraints = {
@@ -31,17 +43,24 @@ export function buildRecordingAudioConstraints(carMode: boolean = false): MediaT
   return constraints;
 }
 
-export async function prepareMicrophoneAccess(
+export async function preparePersistentMicrophoneAccess(
   mediaDevices: Pick<MediaDevices, 'getUserMedia'> | undefined,
   carMode: boolean = false,
-): Promise<void> {
+): Promise<MediaStream> {
   if (!mediaDevices?.getUserMedia) {
     throw new Error('This browser does not support microphone access');
   }
 
-  const stream = await mediaDevices.getUserMedia({
+  return mediaDevices.getUserMedia({
     audio: buildRecordingAudioConstraints(carMode),
   });
+}
+
+export async function prepareMicrophoneAccess(
+  mediaDevices: Pick<MediaDevices, 'getUserMedia'> | undefined,
+  carMode: boolean = false,
+): Promise<void> {
+  const stream = await preparePersistentMicrophoneAccess(mediaDevices, carMode);
 
   stream.getTracks().forEach((track) => track.stop());
 }
@@ -85,10 +104,16 @@ export function useAudioRecorder(
   const analyserRef = useRef<AnalyserNode | null>(null);
   const sourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const preparedStreamRef = useRef<MediaStream | null>(null);
+  const activeStreamShouldPersistRef = useRef(false);
   const silenceRafRef = useRef<number | null>(null);
   const silenceTriggeredRef = useRef(false);
   const detectedSpeechRef = useRef(false);
   const isStartingRef = useRef(false);
+
+  const stopStreamTracks = useCallback((stream: Pick<MediaStream, 'getTracks'> | null | undefined) => {
+    stream?.getTracks().forEach((track) => track.stop());
+  }, []);
 
   const stopSilenceMonitor = useCallback(() => {
     if (silenceRafRef.current !== null) {
@@ -107,14 +132,61 @@ export function useAudioRecorder(
     }
   }, []);
 
+  const releasePreparedRecordingSession = useCallback(() => {
+    const preparedStream = preparedStreamRef.current;
+    if (preparedStream && streamRef.current === preparedStream && isRecording) {
+      return;
+    }
+
+    preparedStreamRef.current = null;
+
+    if (streamRef.current === preparedStream && !isRecording) {
+      streamRef.current = null;
+    }
+
+    stopStreamTracks(preparedStream);
+  }, [isRecording, stopStreamTracks]);
+
   const cleanupRecordingResources = useCallback(() => {
     stopSilenceMonitor();
-    streamRef.current?.getTracks().forEach((track) => track.stop());
+    const activeStream = streamRef.current;
+    const shouldPersistActiveStream =
+      activeStreamShouldPersistRef.current &&
+      activeStream !== null &&
+      activeStream === preparedStreamRef.current &&
+      hasLiveAudioTracks(activeStream);
+
+    if (!shouldPersistActiveStream) {
+      stopStreamTracks(activeStream);
+
+      if (activeStream !== null && activeStream === preparedStreamRef.current) {
+        preparedStreamRef.current = null;
+      }
+    }
+
     streamRef.current = null;
     mediaRecorderRef.current = null;
     chunksRef.current = [];
+    activeStreamShouldPersistRef.current = false;
     setIsRecording(false);
-  }, [stopSilenceMonitor]);
+  }, [stopSilenceMonitor, stopStreamTracks]);
+
+  const prepareRecordingSession = useCallback(async (): Promise<void> => {
+    if (!options.carMode) {
+      await prepareMicrophoneAccess(navigator.mediaDevices, options.carMode);
+      return;
+    }
+
+    if (hasLiveAudioTracks(preparedStreamRef.current)) {
+      return;
+    }
+
+    releasePreparedRecordingSession();
+    preparedStreamRef.current = await preparePersistentMicrophoneAccess(
+      navigator.mediaDevices,
+      options.carMode,
+    );
+  }, [options.carMode, releasePreparedRecordingSession]);
 
   const startRecording = useCallback(async (): Promise<boolean> => {
     if (isStartingRef.current) {
@@ -128,6 +200,7 @@ export function useAudioRecorder(
 
     isStartingRef.current = true;
     let stream: MediaStream | null = null;
+    let shouldPersistActiveStream = false;
 
     try {
       setError(null);
@@ -135,10 +208,31 @@ export function useAudioRecorder(
       detectedSpeechRef.current = false;
       silenceTriggeredRef.current = false;
 
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: buildRecordingAudioConstraints(options.carMode),
-      });
+      if (options.carMode) {
+        if (hasLiveAudioTracks(preparedStreamRef.current)) {
+          stream = preparedStreamRef.current;
+          shouldPersistActiveStream = true;
+        } else {
+          stream = await preparePersistentMicrophoneAccess(
+            navigator.mediaDevices,
+            options.carMode,
+          );
+          preparedStreamRef.current = stream;
+          shouldPersistActiveStream = true;
+        }
+      } else {
+        stream = await preparePersistentMicrophoneAccess(
+          navigator.mediaDevices,
+          options.carMode,
+        );
+      }
+
+      if (!stream) {
+        throw new Error('Failed to access microphone');
+      }
+
       streamRef.current = stream;
+      activeStreamShouldPersistRef.current = shouldPersistActiveStream;
 
       const mimeType = getPreferredAudioMimeType(MediaRecorder);
       const mediaRecorder = mimeType
@@ -203,15 +297,18 @@ export function useAudioRecorder(
       const message = err instanceof Error ? err.message : 'Failed to access microphone';
       setError(message);
       stopSilenceMonitor();
-      stream?.getTracks().forEach((track) => track.stop());
+      if (!shouldPersistActiveStream) {
+        stopStreamTracks(stream);
+      }
       streamRef.current = null;
+      activeStreamShouldPersistRef.current = false;
       mediaRecorderRef.current = null;
       chunksRef.current = [];
       throw err;
     } finally {
       isStartingRef.current = false;
     }
-  }, [options.carMode, options.onSilenceTimeout, silenceTimeoutMs, stopSilenceMonitor]);
+  }, [options.carMode, options.onSilenceTimeout, silenceTimeoutMs, stopSilenceMonitor, stopStreamTracks]);
 
   const stopRecording = useCallback(async (): Promise<Blob> => {
     return new Promise((resolve, reject) => {
@@ -243,8 +340,22 @@ export function useAudioRecorder(
     });
   }, [cleanupRecordingResources]);
 
+  useEffect(() => {
+    if (!options.carMode) {
+      releasePreparedRecordingSession();
+    }
+  }, [options.carMode, releasePreparedRecordingSession]);
+
+  useEffect(() => {
+    return () => {
+      releasePreparedRecordingSession();
+    };
+  }, [releasePreparedRecordingSession]);
+
   return {
     isRecording,
+    prepareRecordingSession,
+    releasePreparedRecordingSession,
     startRecording,
     stopRecording,
     error,

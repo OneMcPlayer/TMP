@@ -14,6 +14,11 @@ import {
   useAudioRecorder,
 } from '@/hooks/use-audio-recorder';
 import {
+  resolvePreferredAudioSessionType,
+  setPreferredAudioSessionType,
+  subscribeToAudioSessionState,
+} from '@/lib/audio-session';
+import {
   textToSpeech,
   prefetchTextToSpeech,
   speechToText,
@@ -154,7 +159,12 @@ export default function RehearsalPage() {
   const isStoppingRecordingRef = useRef(false);
   const isAutoStartingRecordingRef = useRef(false);
   const onSilenceTimeoutRef = useRef<(() => void) | null>(null);
-  const { startRecording, stopRecording, isRecording } = useAudioRecorder({
+  const {
+    prepareRecordingSession,
+    startRecording,
+    stopRecording,
+    isRecording,
+  } = useAudioRecorder({
     carMode,
     silenceTimeoutMs: 5000,
     onSilenceTimeout: () => onSilenceTimeoutRef.current?.(),
@@ -200,6 +210,7 @@ export default function RehearsalPage() {
   const correctionAudioCacheRef = useRef<Map<number, Blob>>(new Map());
   const prefetchedAudioIndexesRef = useRef<Set<number>>(new Set());
   const hasScheduledInitialAudioPrefetchRef = useRef(false);
+  const lastAppliedAudioSessionTypeRef = useRef<string | null>(null);
 
   useEffect(() => {
     rehearsalLinesRef.current = rehearsalLines;
@@ -248,6 +259,13 @@ export default function RehearsalPage() {
   const showPreparationRecoveryAction = shouldOfferPreparationRecovery(slowPreparationSeconds * 1000);
   const shouldKeepScreenAwake = carMode && hasStarted && !isComplete;
   const shouldShowFirstSetupScreen = showSetup && !hasStarted && !hasCompletedDeviceSetup;
+  const preferredAudioSessionType = resolvePreferredAudioSessionType({
+    carMode,
+    hasCompletedDeviceSetup,
+    hasStarted,
+    isPreparingDevice,
+    isRecording,
+  });
 
   const releaseWakeLock = useCallback(async () => {
     const currentWakeLock = wakeLockSentinelRef.current;
@@ -267,6 +285,27 @@ export default function RehearsalPage() {
   useEffect(() => {
     rehearsalStateRef.current = rehearsalState;
   }, [rehearsalState]);
+
+  useEffect(() => {
+    const result = setPreferredAudioSessionType(navigator, preferredAudioSessionType);
+    if (!result.supported) {
+      return;
+    }
+
+    if (lastAppliedAudioSessionTypeRef.current !== preferredAudioSessionType || result.changed) {
+      lastAppliedAudioSessionTypeRef.current = preferredAudioSessionType;
+      addDebugLog(
+        'Audio Session Configured',
+        `type=${preferredAudioSessionType}${result.state ? ` | state=${result.state}` : ''}`,
+      );
+    }
+  }, [addDebugLog, preferredAudioSessionType]);
+
+  useEffect(() => {
+    return subscribeToAudioSessionState(navigator, (state) => {
+      addDebugLog('Audio Session State Changed', `state=${state}`);
+    });
+  }, [addDebugLog]);
 
   useEffect(() => {
     const wakeLockApi = (navigator as NavigatorWithWakeLock).wakeLock;
@@ -809,7 +848,10 @@ export default function RehearsalPage() {
     try {
       const result = await prepareDeviceForRehearsal({
         primeAudioPlayback,
-        prepareMicrophone: () => prepareMicrophoneAccess(navigator.mediaDevices, carMode),
+        prepareMicrophone: () =>
+          carMode
+            ? prepareRecordingSession()
+            : prepareMicrophoneAccess(navigator.mediaDevices, carMode),
         onPlaybackReady: () => {
           setPlaybackSetupStatus('ready');
           addDebugLog('Playback Ready', 'Audio playback primed before rehearsal');
@@ -825,7 +867,12 @@ export default function RehearsalPage() {
         },
         onMicrophoneReady: () => {
           setMicrophoneSetupStatus('ready');
-          addDebugLog('Microphone Ready', 'Microphone permission granted before rehearsal');
+          addDebugLog(
+            'Microphone Ready',
+            carMode
+              ? 'Microphone permission granted and kept warm for car mode'
+              : 'Microphone permission granted before rehearsal',
+          );
         },
         onMicrophoneError: (error) => {
           const message = getPreparationErrorMessage(
@@ -842,7 +889,9 @@ export default function RehearsalPage() {
         setHasCompletedDeviceSetup(true);
         toast({
           title: 'Device Ready',
-          description: 'Microphone and playback are prepared for a smoother rehearsal start.',
+          description: carMode
+            ? 'Microphone, playback, and car-mode audio routing are prepared for rehearsal.'
+            : 'Microphone and playback are prepared for a smoother rehearsal start.',
         });
       } else {
         toast({
@@ -854,7 +903,7 @@ export default function RehearsalPage() {
     } finally {
       setIsPreparingDevice(false);
     }
-  }, [addDebugLog, carMode, isPreparingDevice, toast]);
+  }, [addDebugLog, carMode, isPreparingDevice, prepareRecordingSession, toast]);
 
   const handleStartRecording = useCallback(async () => {
     if (

@@ -150,6 +150,46 @@ test.describe('rehearsal browser e2e', () => {
     await expect(page.getByTestId('line-0')).toHaveClass(/ring-2/);
     await expect(page.getByTestId('line-0')).toContainText('Recall your line...');
   });
+
+  test('car mode reuses the prepared microphone stream after device setup', async ({ page }) => {
+    await setupRehearsalApp(page, {
+      carMode: true,
+      script: CAR_MODE_SCRIPT,
+      selectedCharacter: 'BOB',
+    });
+
+    await completeDeviceSetup(page);
+    await expect
+      .poll(
+        () =>
+          page.evaluate(
+            () =>
+              (
+                window as Window & {
+                  __e2eGetUserMediaCalls?: number;
+                }
+              ).__e2eGetUserMediaCalls ?? 0,
+          ),
+      )
+      .toBe(1);
+
+    await page.getByTestId('button-start-rehearsal').click();
+    await expect(page.getByTestId('button-stop-recording')).toBeVisible();
+
+    await expect
+      .poll(
+        () =>
+          page.evaluate(
+            () =>
+              (
+                window as Window & {
+                  __e2eGetUserMediaCalls?: number;
+                }
+              ).__e2eGetUserMediaCalls ?? 0,
+          ),
+      )
+      .toBe(1);
+  });
 });
 
 test.describe('rehearsal mobile layout e2e', () => {

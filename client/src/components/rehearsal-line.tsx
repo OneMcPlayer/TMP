@@ -77,6 +77,7 @@ export function RehearsalLineComponent({ line, isCurrentLine }: RehearsalLinePro
         </div>
         
         <div className="flex-1 min-w-0">
+          {/* Keep the original compact badge row until we do a broader mobile overflow pass. */}
           <div className="flex items-center gap-2 mb-1">
             <span className={cn(
               'font-semibold text-sm',

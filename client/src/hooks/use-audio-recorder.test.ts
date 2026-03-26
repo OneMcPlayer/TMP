@@ -5,9 +5,11 @@ import {
   buildRecordingAudioConstraints,
   getPreferredAudioMimeType,
   getRecordingCaptureError,
+  hasLiveAudioTracks,
   NO_AUDIO_CAPTURED_ERROR,
   NO_SPEECH_DETECTED_ERROR,
   prepareMicrophoneAccess,
+  preparePersistentMicrophoneAccess,
 } from './use-audio-recorder';
 
 test('buildRecordingAudioConstraints keeps the default cleanup settings', () => {
@@ -108,6 +110,52 @@ test('prepareMicrophoneAccess warms microphone permission and stops the temporar
     },
   });
   assert.equal(stopCalls, 1);
+});
+
+test('preparePersistentMicrophoneAccess returns the live stream without stopping it', async () => {
+  let stopCalls = 0;
+  const stream = {
+    getTracks: () => [
+      {
+        readyState: 'live',
+        stop: () => {
+          stopCalls += 1;
+        },
+      },
+    ],
+  } as unknown as MediaStream;
+
+  const preparedStream = await preparePersistentMicrophoneAccess(
+    {
+      getUserMedia: async () => stream,
+    },
+    true,
+  );
+
+  assert.equal(preparedStream, stream);
+  assert.equal(stopCalls, 0);
+});
+
+test('hasLiveAudioTracks only reports usable streams with non-ended tracks', () => {
+  assert.equal(hasLiveAudioTracks(null), false);
+  assert.equal(
+    hasLiveAudioTracks({
+      getTracks: () => [{ readyState: 'ended' }],
+    } as unknown as MediaStream),
+    false,
+  );
+  assert.equal(
+    hasLiveAudioTracks({
+      getTracks: () => [{ readyState: 'live' }],
+    } as unknown as MediaStream),
+    true,
+  );
+  assert.equal(
+    hasLiveAudioTracks({
+      getTracks: () => [{}],
+    } as unknown as MediaStream),
+    true,
+  );
 });
 
 test('prepareMicrophoneAccess reports unsupported browsers clearly', async () => {
