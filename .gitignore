@@ -7,3 +7,4 @@ vite.config.ts.*
 *.tar.gz
 playwright-report
 test-results
+output
