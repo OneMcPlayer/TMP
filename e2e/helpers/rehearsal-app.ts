@@ -20,6 +20,7 @@ export interface RehearsalAppOptions {
   carMode?: boolean;
   latestVersion?: string;
   microphoneMode?: MicrophoneMode;
+  rejectAudioPlayCallNumber?: number;
   script?: MockScript;
   selectedCharacter?: string | null;
   transcriptionText?: string;
@@ -58,6 +59,7 @@ export async function setupRehearsalApp(
     carMode = false,
     latestVersion = '1.0.12',
     microphoneMode = 'normal',
+    rejectAudioPlayCallNumber = -1,
     script = PARTNER_LEAD_SCRIPT,
     selectedCharacter = null,
     transcriptionText = 'My cue line.',
@@ -70,6 +72,7 @@ export async function setupRehearsalApp(
       autoSpeakCorrections: initAutoSpeakCorrections,
       carMode: initCarMode,
       microphoneMode: initMicrophoneMode,
+      rejectAudioPlayCallNumber: initRejectAudioPlayCallNumber,
       selectedCharacter: initSelectedCharacter,
       wakeLockSupported: initWakeLockSupported,
     }) => {
@@ -102,6 +105,16 @@ export async function setupRehearsalApp(
         configurable: true,
         writable: true,
         value: [] as string[],
+      });
+      Object.defineProperty(window, '__e2eAudioPlayCalls', {
+        configurable: true,
+        writable: true,
+        value: 0,
+      });
+      Object.defineProperty(window, '__e2eRejectNextAudioPlay', {
+        configurable: true,
+        writable: true,
+        value: false,
       });
 
       const mediaSession = {
@@ -175,6 +188,17 @@ export async function setupRehearsalApp(
       Object.defineProperty(HTMLMediaElement.prototype, 'play', {
         configurable: true,
         value: function play() {
+          window.__e2eAudioPlayCalls += 1;
+
+          if (window.__e2eRejectNextAudioPlay) {
+            window.__e2eRejectNextAudioPlay = false;
+            return Promise.reject(new DOMException('Playback blocked', 'NotAllowedError'));
+          }
+
+          if (window.__e2eAudioPlayCalls === initRejectAudioPlayCallNumber) {
+            return Promise.reject(new DOMException('Playback blocked', 'NotAllowedError'));
+          }
+
           setTimeout(() => {
             this.dispatchEvent(new Event('ended'));
           }, 0);
@@ -312,6 +336,7 @@ export async function setupRehearsalApp(
       autoSpeakCorrections,
       carMode,
       microphoneMode,
+      rejectAudioPlayCallNumber,
       selectedCharacter,
       wakeLockSupported,
     },

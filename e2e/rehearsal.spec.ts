@@ -190,6 +190,38 @@ test.describe('rehearsal browser e2e', () => {
       )
       .toBe(1);
   });
+
+  test('re-enables blocked Safari correction playback and resumes the spoken correction', async ({ page }) => {
+    await setupRehearsalApp(page, {
+      script: PARTNER_LEAD_SCRIPT,
+      selectedCharacter: 'BOB',
+      transcriptionText: 'Something incorrect.',
+    });
+
+    await page.getByTestId('button-start-rehearsal').click();
+    await expect(page.getByTestId('line-1')).toContainText('Recall your line...');
+
+    await page.getByTestId('button-record').click();
+    await expect(page.getByTestId('button-stop-recording')).toBeVisible();
+    await page.getByTestId('button-stop-recording').click({ force: true });
+
+    await expect(page.getByRole('button', { name: 'Hear Correct Line' })).toBeVisible();
+    await page.evaluate(() => {
+      (
+        window as Window & {
+          __e2eRejectNextAudioPlay?: boolean;
+        }
+      ).__e2eRejectNextAudioPlay = true;
+    });
+    await page.getByRole('button', { name: 'Hear Correct Line' }).click();
+
+    await expect(page.getByText('Safari Needs One More Tap')).toBeVisible();
+    await expect(page.getByTestId('button-reenable-audio')).toBeVisible();
+    await page.getByTestId('button-reenable-audio').click();
+
+    await expect(page.getByText('Safari Needs One More Tap')).toBeHidden();
+    await expect(page.getByTestId('line-1')).toContainText('Correction spoken');
+  });
 });
 
 test.describe('rehearsal mobile layout e2e', () => {

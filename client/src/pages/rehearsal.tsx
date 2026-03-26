@@ -102,6 +102,10 @@ type DeviceSetupStatus = 'idle' | 'pending' | 'ready' | 'error';
 
 type WakeLockStatus = 'active' | 'requesting' | 'inactive' | 'unavailable' | 'error';
 
+type PendingAudioRecovery =
+  | { kind: 'partner-line'; lineIndex: number; audioBlob: Blob }
+  | { kind: 'correction'; lineIndex: number; audioBlob: Blob };
+
 type NavigatorWithWakeLock = Navigator & {
   wakeLock?: {
     request: (type: 'screen') => Promise<WakeLockSentinel>;
@@ -198,6 +202,8 @@ export default function RehearsalPage() {
   const [versionCheckedAt, setVersionCheckedAt] = useState<string | null>(null);
   const [slowPreparationSeconds, setSlowPreparationSeconds] = useState(0);
   const [wakeLockStatus, setWakeLockStatus] = useState<WakeLockStatus>('inactive');
+  const [audioRecoveryMessage, setAudioRecoveryMessage] = useState<string | null>(null);
+  const [isRecoveringAudio, setIsRecoveringAudio] = useState(false);
 
   const rehearsalLinesRef = useRef<RehearsalLine[]>([]);
   const currentLineIndexRef = useRef(-1);
@@ -211,6 +217,7 @@ export default function RehearsalPage() {
   const prefetchedAudioIndexesRef = useRef<Set<number>>(new Set());
   const hasScheduledInitialAudioPrefetchRef = useRef(false);
   const lastAppliedAudioSessionTypeRef = useRef<string | null>(null);
+  const pendingAudioRecoveryRef = useRef<PendingAudioRecovery | null>(null);
 
   useEffect(() => {
     rehearsalLinesRef.current = rehearsalLines;
@@ -229,6 +236,20 @@ export default function RehearsalPage() {
       appendDebugLogEntry(entries, createDebugLogEntry(event, details)),
     );
   }, []);
+
+  const clearAudioRecovery = useCallback(() => {
+    pendingAudioRecoveryRef.current = null;
+    setAudioRecoveryMessage(null);
+  }, []);
+
+  const queueAudioRecovery = useCallback((message: string, pendingRecovery?: PendingAudioRecovery) => {
+    if (pendingRecovery) {
+      pendingAudioRecoveryRef.current = pendingRecovery;
+    }
+
+    setAudioRecoveryMessage(message);
+    addDebugLog('Audio Recovery Required', message);
+  }, [addDebugLog]);
 
   const updateRehearsalState = useCallback((nextState: RehearsalState) => {
     rehearsalStateRef.current = nextState;
@@ -304,8 +325,20 @@ export default function RehearsalPage() {
   useEffect(() => {
     return subscribeToAudioSessionState(navigator, (state) => {
       addDebugLog('Audio Session State Changed', `state=${state}`);
+
+      if (!hasStarted) {
+        return;
+      }
+
+      if (state === 'interrupted' || state === 'inactive') {
+        queueAudioRecovery(
+          carMode
+            ? 'iPhone paused the car-mode audio session. Tap Re-enable Audio to keep spoken playback and microphone routing ready.'
+            : 'iPhone paused spoken playback. Tap Re-enable Audio to keep the rehearsal moving.',
+        );
+      }
     });
-  }, [addDebugLog]);
+  }, [addDebugLog, carMode, hasStarted, queueAudioRecovery]);
 
   useEffect(() => {
     const wakeLockApi = (navigator as NavigatorWithWakeLock).wakeLock;
@@ -527,6 +560,7 @@ export default function RehearsalPage() {
 
   useEffect(() => {
     if (script && selectedCharacter) {
+      clearAudioRecovery();
       clearCorrectionAudioCache();
       clearPrefetchedAudioIndexes();
       const lines = buildRehearsalLines(script, selectedCharacter);
@@ -536,7 +570,14 @@ export default function RehearsalPage() {
       setIsComplete(false);
       updateRehearsalState('idle');
     }
-  }, [clearCorrectionAudioCache, clearPrefetchedAudioIndexes, script, selectedCharacter, updateRehearsalState]);
+  }, [
+    clearAudioRecovery,
+    clearCorrectionAudioCache,
+    clearPrefetchedAudioIndexes,
+    script,
+    selectedCharacter,
+    updateRehearsalState,
+  ]);
 
   const characters = script ? Array.from(new Set(script.lines.map(l => l.character))) : [];
   const completedLines = rehearsalLines.filter(l => l.state === 'completed').length;
@@ -624,6 +665,37 @@ export default function RehearsalPage() {
     prefetchLineWindow(currentLineIndex, LOOKAHEAD_AUDIO_PREFETCH_COUNT);
   }, [currentLineIndex, hasApiKey, hasStarted, prefetchLineWindow]);
 
+  const playBlobWithRecovery = useCallback(
+    async (pendingRecovery: PendingAudioRecovery): Promise<boolean> => {
+      try {
+        await playAudioBlob(pendingRecovery.audioBlob);
+        clearAudioRecovery();
+        return true;
+      } catch (err) {
+        if (isPlaybackPermissionError(err)) {
+          const message =
+            pendingRecovery.kind === 'correction'
+              ? carMode
+                ? 'Safari paused car-mode audio before the spoken correction. Tap Re-enable Audio to hear it.'
+                : 'Safari paused audio before the spoken correction. Tap Re-enable Audio to hear it.'
+              : carMode
+                ? 'Safari paused car-mode playback. Tap Re-enable Audio to continue the scene.'
+                : 'Safari paused spoken playback. Tap Re-enable Audio to continue the scene.';
+
+          queueAudioRecovery(message, pendingRecovery);
+          toast({
+            title: 'Tap to Re-enable Audio',
+            description: message,
+          });
+          return false;
+        }
+
+        throw err;
+      }
+    },
+    [carMode, clearAudioRecovery, queueAudioRecovery, toast],
+  );
+
   const speakExpectedLine = useCallback(
     async (lineIndex: number = currentLineIndexRef.current) => {
       const line = rehearsalLinesRef.current[lineIndex];
@@ -649,7 +721,14 @@ export default function RehearsalPage() {
           correctionAudioCacheRef.current.set(lineIndex, audioBlob);
         }
 
-        await playAudioBlob(audioBlob);
+        const didPlayCorrection = await playBlobWithRecovery({
+          kind: 'correction',
+          lineIndex,
+          audioBlob,
+        });
+        if (!didPlayCorrection) {
+          return;
+        }
 
         setRehearsalLines((previousLines) =>
           previousLines.map((rehearsalLine, index) =>
@@ -659,32 +738,20 @@ export default function RehearsalPage() {
           ),
         );
       } catch (err) {
-        if (isPlaybackPermissionError(err)) {
-          addDebugLog(
-            'Correction Playback Blocked',
-            err instanceof Error ? err.message : 'Browser blocked autoplay',
-          );
-          toast({
-            title: 'Tap to Hear the Correct Line',
-            description:
-              "Automatic playback was blocked by your browser. Tap 'Hear Correct Line' to play it.",
-          });
-        } else {
-          addDebugLog(
-            'Correction Playback Error',
-            err instanceof Error ? err.message : 'Failed to read the correct line',
-          );
-          toast({
-            variant: 'destructive',
-            title: 'Correction Playback Error',
-            description: err instanceof Error ? err.message : 'Failed to read the correct line',
-          });
-        }
+        addDebugLog(
+          'Correction Playback Error',
+          err instanceof Error ? err.message : 'Failed to read the correct line',
+        );
+        toast({
+          variant: 'destructive',
+          title: 'Correction Playback Error',
+          description: err instanceof Error ? err.message : 'Failed to read the correct line',
+        });
       } finally {
         updateRehearsalState('showing-feedback');
       }
     },
-    [addDebugLog, toast, updateRehearsalState],
+    [addDebugLog, playBlobWithRecovery, toast, updateRehearsalState],
   );
 
   const processLine = useCallback(async (lineIndex: number) => {
@@ -734,11 +801,17 @@ export default function RehearsalPage() {
     if (!line.isUserLine) {
       updateRehearsalState('playing-tts');
       addDebugLog('Playing Partner Line', `Line ${lineIndex + 1} (${line.character})`);
+      let shouldAdvanceAfterPlayback = true;
+
       try {
         const audioBlob = await textToSpeech(speakableText, {
           voice: getVoiceForCharacter(line.character),
         });
-        await playAudioBlob(audioBlob);
+        shouldAdvanceAfterPlayback = await playBlobWithRecovery({
+          kind: 'partner-line',
+          lineIndex,
+          audioBlob,
+        });
       } catch (err) {
         addDebugLog(
           'TTS Error',
@@ -749,6 +822,10 @@ export default function RehearsalPage() {
           title: 'TTS Error',
           description: err instanceof Error ? err.message : 'Failed to speak line',
         });
+      }
+
+      if (!shouldAdvanceAfterPlayback) {
+        return;
       }
 
       setRehearsalLines(prev => prev.map((l, i) => 
@@ -771,7 +848,7 @@ export default function RehearsalPage() {
       addDebugLog('Waiting For User Line', `Line ${lineIndex + 1} (${line.character})`);
       updateRehearsalState('waiting-for-user');
     }
-  }, [addDebugLog, toast, updateRehearsalState]);
+  }, [addDebugLog, playBlobWithRecovery, toast, updateRehearsalState]);
 
   const handleStart = useCallback(async () => {
     if (isStartingRef.current) {
@@ -886,6 +963,7 @@ export default function RehearsalPage() {
       });
 
       if (result.playbackReady && result.microphoneReady) {
+        clearAudioRecovery();
         setHasCompletedDeviceSetup(true);
         toast({
           title: 'Device Ready',
@@ -903,7 +981,134 @@ export default function RehearsalPage() {
     } finally {
       setIsPreparingDevice(false);
     }
-  }, [addDebugLog, carMode, isPreparingDevice, prepareRecordingSession, toast]);
+  }, [addDebugLog, carMode, clearAudioRecovery, isPreparingDevice, prepareRecordingSession, toast]);
+
+  const handleReenableAudio = useCallback(async () => {
+    if (isRecoveringAudio) {
+      return;
+    }
+
+    setIsRecoveringAudio(true);
+    const pendingRecovery = pendingAudioRecoveryRef.current;
+    addDebugLog(
+      'Audio Recovery Requested',
+      pendingRecovery
+        ? `${pendingRecovery.kind} | line ${pendingRecovery.lineIndex + 1}`
+        : 'Manual audio re-arm',
+    );
+
+    try {
+      const result = await prepareDeviceForRehearsal({
+        primeAudioPlayback,
+        prepareMicrophone: async () => {
+          if (carMode) {
+            await prepareRecordingSession();
+          }
+        },
+        onPlaybackReady: () => {
+          addDebugLog('Playback Ready', 'Audio playback re-enabled after interruption');
+        },
+        onPlaybackError: (error) => {
+          addDebugLog(
+            'Playback Prep Error',
+            getPreparationErrorMessage(error, 'Audio playback could not be re-enabled'),
+          );
+        },
+        onMicrophoneReady: () => {
+          if (carMode) {
+            addDebugLog('Microphone Ready', 'Car-mode microphone session re-armed after interruption');
+          }
+        },
+        onMicrophoneError: (error) => {
+          if (carMode) {
+            addDebugLog(
+              'Microphone Prep Error',
+              getPreparationErrorMessage(error, 'Microphone access could not be re-armed'),
+            );
+          }
+        },
+      });
+
+      if (!result.playbackReady || !result.microphoneReady) {
+        throw new Error(
+          carMode
+            ? 'Audio or microphone could not be re-enabled. Try the button again.'
+            : 'Audio could not be re-enabled. Try the button again.',
+        );
+      }
+
+      clearAudioRecovery();
+
+      if (!pendingRecovery) {
+        toast({
+          title: 'Audio Re-enabled',
+          description: carMode
+            ? 'Spoken playback and car-mode audio are ready again.'
+            : 'Spoken playback is ready again.',
+        });
+        return;
+      }
+
+      pendingAudioRecoveryRef.current = null;
+      const didReplayBlockedAudio = await playBlobWithRecovery(pendingRecovery);
+      if (!didReplayBlockedAudio) {
+        return;
+      }
+
+      if (pendingRecovery.kind === 'correction') {
+        setRehearsalLines((previousLines) =>
+          previousLines.map((rehearsalLine, index) =>
+            index === pendingRecovery.lineIndex
+              ? { ...rehearsalLine, correctionPlayed: true }
+              : rehearsalLine,
+          ),
+        );
+        return;
+      }
+
+      setRehearsalLines((previousLines) =>
+        previousLines.map((rehearsalLine, index) =>
+          index === pendingRecovery.lineIndex
+            ? { ...rehearsalLine, state: 'completed' }
+            : rehearsalLine,
+        ),
+      );
+
+      const nextIndex = pendingRecovery.lineIndex + 1;
+      const currentLines = rehearsalLinesRef.current;
+      if (nextIndex < currentLines.length) {
+        setCurrentLineIndex(nextIndex);
+        window.setTimeout(() => {
+          void processLine(nextIndex);
+        }, 500);
+      } else {
+        addDebugLog('Rehearsal Complete', 'Reached end of script');
+        setIsComplete(true);
+        updateRehearsalState('idle');
+      }
+    } catch (err) {
+      const message = getPreparationErrorMessage(err, 'Audio could not be re-enabled');
+      setAudioRecoveryMessage(message);
+      toast({
+        variant: 'destructive',
+        title: 'Audio Still Needs Attention',
+        description: message,
+      });
+    } finally {
+      setIsRecoveringAudio(false);
+    }
+  }, [
+    addDebugLog,
+    carMode,
+    clearAudioRecovery,
+    isRecoveringAudio,
+    playBlobWithRecovery,
+    prepareRecordingSession,
+    primeAudioPlayback,
+    processLine,
+    toast,
+    updateRehearsalState,
+  ]);
 
   const handleStartRecording = useCallback(async () => {
     if (
@@ -1121,9 +1326,10 @@ export default function RehearsalPage() {
   ]);
 
   const handleReplayExpectedLine = useCallback(async () => {
+    clearAudioRecovery();
     await primeAudioPlayback().catch(() => undefined);
     void speakExpectedLine();
-  }, [speakExpectedLine]);
+  }, [clearAudioRecovery, speakExpectedLine]);
 
   const handleRetryLine = useCallback(() => {
     const idx = currentLineIndexRef.current;
@@ -1131,6 +1337,7 @@ export default function RehearsalPage() {
       return;
     }
 
+    clearAudioRecovery();
     setRehearsalLines((previousLines) =>
       previousLines.map((line, index) =>
         index === idx
@@ -1147,7 +1354,7 @@ export default function RehearsalPage() {
     );
     updateRehearsalState('waiting-for-user');
     addDebugLog('Retry Line', `Line ${idx + 1}`);
-  }, [addDebugLog, updateRehearsalState]);
+  }, [addDebugLog, clearAudioRecovery, updateRehearsalState]);
 
   const navigateToLine = useCallback((
     targetIndex: number,
@@ -1163,6 +1370,7 @@ export default function RehearsalPage() {
     }
 
     clearCarModeAutoStartTimeout();
+    clearAudioRecovery();
 
     const nextLines = buildNavigationTargetLines(lines, targetIndex);
 
@@ -1180,7 +1388,7 @@ export default function RehearsalPage() {
     );
 
     void processLine(targetIndex);
-  }, [addDebugLog, clearCarModeAutoStartTimeout, processLine, updateRehearsalState]);
+  }, [addDebugLog, clearAudioRecovery, clearCarModeAutoStartTimeout, processLine, updateRehearsalState]);
 
   const handlePrevious = useCallback(() => {
     navigateToLine(currentLineIndexRef.current - 1, 'previous');
@@ -1217,6 +1425,7 @@ export default function RehearsalPage() {
     }
 
     clearCarModeAutoStartTimeout();
+    clearAudioRecovery();
 
     setRehearsalLines((previousLines) =>
       previousLines.map((rehearsalLine, index) =>
@@ -1225,10 +1434,11 @@ export default function RehearsalPage() {
     );
     addDebugLog('Line Skipped', `Line ${idx + 1} (${line.character})`);
     updateRehearsalState('showing-feedback');
-  }, [addDebugLog, clearCarModeAutoStartTimeout, updateRehearsalState]);
+  }, [addDebugLog, clearAudioRecovery, clearCarModeAutoStartTimeout, updateRehearsalState]);
 
   const handleRestart = useCallback(() => {
     clearCarModeAutoStartTimeout();
+    clearAudioRecovery();
     clearCorrectionAudioCache();
     clearPrefetchedAudioIndexes();
     setShowSetup(true);
@@ -1243,6 +1453,7 @@ export default function RehearsalPage() {
     }
   }, [
     addDebugLog,
+    clearAudioRecovery,
     clearCarModeAutoStartTimeout,
     clearCorrectionAudioCache,
     clearPrefetchedAudioIndexes,
@@ -1607,6 +1818,28 @@ export default function RehearsalPage() {
 
         <div className="safe-area-bottom safe-area-x sticky bottom-0 border-t border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
           <div className="p-4">
+            {audioRecoveryMessage && (
+              <Alert className="mb-4 border-primary/40 bg-primary/5">
+                <AlertCircle className="h-4 w-4" />
+                <AlertTitle>Safari Needs One More Tap</AlertTitle>
+                <AlertDescription className="space-y-3">
+                  <p>{audioRecoveryMessage}</p>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      data-testid="button-reenable-audio"
+                      onClick={() => {
+                        void handleReenableAudio();
+                      }}
+                      disabled={isRecoveringAudio}
+                    >
+                      <RefreshCw className={isRecoveringAudio ? 'mr-2 h-4 w-4 animate-spin' : 'mr-2 h-4 w-4'} />
+                      {isRecoveringAudio ? 'Re-enabling…' : 'Re-enable Audio'}
+                    </Button>
+                  </div>
+                </AlertDescription>
+              </Alert>
+            )}
             <RehearsalControls
               state={rehearsalState}
               onStartRecording={handleStartRecording}
