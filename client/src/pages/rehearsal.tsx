@@ -15,6 +15,7 @@ import {
 } from '@/hooks/use-audio-recorder';
 import {
   textToSpeech,
+  prefetchTextToSpeech,
   speechToText,
   playAudioBlob,
   getApiKey,
@@ -57,6 +58,8 @@ import { Textarea } from '@/components/ui/textarea';
 const PREFERENCES_STORAGE_KEY = 'rehearsal_preferences';
 const TRACK_NAVIGATION_STATES: RehearsalState[] = ['waiting-for-user', 'showing-feedback'];
 const CAR_MODE_AUTO_START_DELAY_MS = 1000;
+const INITIAL_AUDIO_PREFETCH_COUNT = 5;
+const LOOKAHEAD_AUDIO_PREFETCH_COUNT = 3;
 
 const VOICE_MAP: Record<string, string> = {
   'CLOV': 'fable',
@@ -195,6 +198,8 @@ export default function RehearsalPage() {
   const carModeAutoStartTimeoutRef = useRef<number | null>(null);
   const wakeLockSentinelRef = useRef<WakeLockSentinel | null>(null);
   const correctionAudioCacheRef = useRef<Map<number, Blob>>(new Map());
+  const prefetchedAudioIndexesRef = useRef<Set<number>>(new Set());
+  const hasScheduledInitialAudioPrefetchRef = useRef(false);
 
   useEffect(() => {
     rehearsalLinesRef.current = rehearsalLines;
@@ -228,6 +233,11 @@ export default function RehearsalPage() {
 
   const clearCorrectionAudioCache = useCallback(() => {
     correctionAudioCacheRef.current.clear();
+  }, []);
+
+  const clearPrefetchedAudioIndexes = useCallback(() => {
+    prefetchedAudioIndexesRef.current.clear();
+    hasScheduledInitialAudioPrefetchRef.current = false;
   }, []);
 
   const debugLogText = serializeDebugLogEntries(debugLogEntries);
@@ -479,6 +489,7 @@ export default function RehearsalPage() {
   useEffect(() => {
     if (script && selectedCharacter) {
       clearCorrectionAudioCache();
+      clearPrefetchedAudioIndexes();
       const lines = buildRehearsalLines(script, selectedCharacter);
       setRehearsalLines(lines);
       setCurrentLineIndex(-1);
@@ -486,7 +497,7 @@ export default function RehearsalPage() {
       setIsComplete(false);
       updateRehearsalState('idle');
     }
-  }, [clearCorrectionAudioCache, script, selectedCharacter, updateRehearsalState]);
+  }, [clearCorrectionAudioCache, clearPrefetchedAudioIndexes, script, selectedCharacter, updateRehearsalState]);
 
   const characters = script ? Array.from(new Set(script.lines.map(l => l.character))) : [];
   const completedLines = rehearsalLines.filter(l => l.state === 'completed').length;
@@ -503,6 +514,76 @@ export default function RehearsalPage() {
   );
   const canGoPrevious = currentLineIndex > 0;
   const canGoNext = currentLineIndex >= 0 && rehearsalLines.length > 0;
+
+  const prefetchLineAudio = useCallback((lineIndex: number) => {
+    if (!hasApiKey || lineIndex < 0) {
+      return;
+    }
+
+    const line = rehearsalLinesRef.current[lineIndex];
+    if (!line) {
+      return;
+    }
+
+    const speakableText = getSpeakableText(line.text);
+    if (!speakableText || prefetchedAudioIndexesRef.current.has(lineIndex)) {
+      return;
+    }
+
+    prefetchedAudioIndexesRef.current.add(lineIndex);
+    void prefetchTextToSpeech(speakableText, {
+      voice: getVoiceForCharacter(line.character),
+    }).then((didPrefetchSucceed) => {
+      if (!didPrefetchSucceed) {
+        prefetchedAudioIndexesRef.current.delete(lineIndex);
+      }
+    });
+  }, [hasApiKey]);
+
+  const prefetchLineWindow = useCallback((startIndex: number, lineCount: number) => {
+    if (!hasApiKey || startIndex < 0) {
+      return;
+    }
+
+    const finalIndex = Math.min(rehearsalLinesRef.current.length, startIndex + lineCount);
+    for (let lineIndex = startIndex; lineIndex < finalIndex; lineIndex += 1) {
+      prefetchLineAudio(lineIndex);
+    }
+  }, [hasApiKey, prefetchLineAudio]);
+
+  useEffect(() => {
+    if (
+      !hasCompletedDeviceSetup ||
+      !hasApiKey ||
+      !script ||
+      !selectedCharacter ||
+      hasScheduledInitialAudioPrefetchRef.current
+    ) {
+      return;
+    }
+
+    hasScheduledInitialAudioPrefetchRef.current = true;
+    addDebugLog(
+      'Audio Prefetch Scheduled',
+      `Warming the first ${INITIAL_AUDIO_PREFETCH_COUNT} rehearsal lines in the background`,
+    );
+    prefetchLineWindow(0, INITIAL_AUDIO_PREFETCH_COUNT);
+  }, [
+    addDebugLog,
+    hasApiKey,
+    hasCompletedDeviceSetup,
+    prefetchLineWindow,
+    script,
+    selectedCharacter,
+  ]);
+
+  useEffect(() => {
+    if (!hasStarted || currentLineIndex < 0 || !hasApiKey) {
+      return;
+    }
+
+    prefetchLineWindow(currentLineIndex, LOOKAHEAD_AUDIO_PREFETCH_COUNT);
+  }, [currentLineIndex, hasApiKey, hasStarted, prefetchLineWindow]);
 
   const speakExpectedLine = useCallback(
     async (lineIndex: number = currentLineIndexRef.current) => {
@@ -1100,6 +1181,7 @@ export default function RehearsalPage() {
   const handleRestart = useCallback(() => {
     clearCarModeAutoStartTimeout();
     clearCorrectionAudioCache();
+    clearPrefetchedAudioIndexes();
     setShowSetup(true);
     addDebugLog('Session Restarted');
     if (script && selectedCharacter) {
@@ -1114,6 +1196,7 @@ export default function RehearsalPage() {
     addDebugLog,
     clearCarModeAutoStartTimeout,
     clearCorrectionAudioCache,
+    clearPrefetchedAudioIndexes,
     script,
     selectedCharacter,
     updateRehearsalState,

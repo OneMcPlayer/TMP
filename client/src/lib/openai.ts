@@ -1,6 +1,9 @@
+import { buildTtsCacheKey, getCachedTtsBlob, setCachedTtsBlob, __resetTtsCacheStateForTests } from './tts-cache';
+
 const API_KEY_STORAGE_KEY = 'openai_api_key';
 const TTS_MODEL = 'tts-1';
 const STT_MODEL = 'gpt-4o-transcribe';
+const TTS_RESPONSE_FORMAT = 'mp3';
 const API_REQUEST_TIMEOUT_MS = 15_000;
 const MAX_API_RETRY_ATTEMPTS = 1;
 const PLAYBACK_PRIMING_TIMEOUT_MS = 1_500;
@@ -26,6 +29,7 @@ const SILENT_WAV_DATA_URI =
 let playbackPrimingPromise: Promise<void> | null = null;
 let playbackAudioElement: HTMLAudioElement | null = null;
 let activePlaybackObjectUrl: string | null = null;
+const pendingTextToSpeechRequests = new Map<string, Promise<Blob>>();
 
 function getPlaybackAudioElement(): HTMLAudioElement {
   if (playbackAudioElement) {
@@ -161,31 +165,76 @@ export async function textToSpeech(
   text: string,
   options: TextToSpeechOptions = {},
 ): Promise<Blob> {
+  const cacheKey = buildTtsCacheKey({
+    text,
+    voice: options.voice ?? 'alloy',
+    model: TTS_MODEL,
+    responseFormat: TTS_RESPONSE_FORMAT,
+  });
+  const pendingRequest = pendingTextToSpeechRequests.get(cacheKey);
+  if (pendingRequest) {
+    return pendingRequest;
+  }
+
+  const cachedBlob = await getCachedTtsBlob(cacheKey);
+  if (cachedBlob) {
+    return cachedBlob;
+  }
+
+  const pendingRequestAfterCacheLookup = pendingTextToSpeechRequests.get(cacheKey);
+  if (pendingRequestAfterCacheLookup) {
+    return pendingRequestAfterCacheLookup;
+  }
+
   const apiKey = getApiKey();
   if (!apiKey) {
     throw new Error('OpenAI API key not configured');
   }
 
-  const response = await fetchWithRetry('https://api.openai.com/v1/audio/speech', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: TTS_MODEL,
-      input: text,
-      voice: options.voice ?? 'alloy',
-      response_format: 'mp3',
-    }),
-  });
+  const requestPromise = (async () => {
+    const response = await fetchWithRetry('https://api.openai.com/v1/audio/speech', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: TTS_MODEL,
+        input: text,
+        voice: options.voice ?? 'alloy',
+        response_format: TTS_RESPONSE_FORMAT,
+      }),
+    });
 
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: { message: 'Unknown error' } }));
-    throw new Error(error.error?.message || `TTS failed: ${response.status}`);
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: { message: 'Unknown error' } }));
+      throw new Error(error.error?.message || `TTS failed: ${response.status}`);
+    }
+
+    const audioBlob = await response.blob();
+    await setCachedTtsBlob(cacheKey, audioBlob);
+    return audioBlob;
+  })();
+
+  pendingTextToSpeechRequests.set(cacheKey, requestPromise);
+
+  try {
+    return await requestPromise;
+  } finally {
+    pendingTextToSpeechRequests.delete(cacheKey);
   }
+}
 
-  return await response.blob();
+export async function prefetchTextToSpeech(
+  text: string,
+  options: TextToSpeechOptions = {},
+): Promise<boolean> {
+  try {
+    await textToSpeech(text, options);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function speechToText(
@@ -223,6 +272,8 @@ export async function speechToText(
 
 export function __resetPlaybackPrimingForTests(): void {
   playbackPrimingPromise = null;
+  pendingTextToSpeechRequests.clear();
+  __resetTtsCacheStateForTests();
   clearActivePlaybackObjectUrl();
 
   if (playbackAudioElement) {

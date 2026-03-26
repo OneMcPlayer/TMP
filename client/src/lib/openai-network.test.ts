@@ -1,10 +1,28 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, test } from 'node:test';
 
-import { getAudioUploadFilename, speechToText, textToSpeech } from './openai';
+import {
+  __resetPlaybackPrimingForTests,
+  getAudioUploadFilename,
+  speechToText,
+  textToSpeech,
+} from './openai';
 
 const originalFetch = globalThis.fetch;
 const originalLocalStorage = globalThis.localStorage;
+const originalCaches = globalThis.caches;
+
+function resolveRequestKey(request: RequestInfo | URL): string {
+  if (request instanceof Request) {
+    return request.url;
+  }
+
+  if (request instanceof URL) {
+    return request.toString();
+  }
+
+  return String(request);
+}
 
 function createStorageMock(): Storage {
   const data = new Map<string, string>();
@@ -31,19 +49,89 @@ function createStorageMock(): Storage {
   };
 }
 
+function createCacheStorageMock(): CacheStorage {
+  const cacheStores = new Map<string, Map<string, Response>>();
+
+  return {
+    async delete(cacheName: string) {
+      return cacheStores.delete(cacheName);
+    },
+    async has(cacheName: string) {
+      return cacheStores.has(cacheName);
+    },
+    async keys() {
+      return Array.from(cacheStores.keys());
+    },
+    async match(request: RequestInfo | URL) {
+      const requestKey = resolveRequestKey(request);
+
+      for (const store of cacheStores.values()) {
+        const response = store.get(requestKey);
+        if (response) {
+          return response.clone();
+        }
+      }
+
+      return undefined;
+    },
+    async open(cacheName: string) {
+      if (!cacheStores.has(cacheName)) {
+        cacheStores.set(cacheName, new Map());
+      }
+
+      const store = cacheStores.get(cacheName)!;
+      return {
+        add: async () => undefined,
+        addAll: async () => undefined,
+        async delete(request: RequestInfo | URL) {
+          return store.delete(resolveRequestKey(request));
+        },
+        async keys() {
+          return [];
+        },
+        async match(request: RequestInfo | URL) {
+          const response = store.get(resolveRequestKey(request));
+          return response?.clone();
+        },
+        async matchAll(request?: RequestInfo | URL) {
+          if (!request) {
+            return Array.from(store.values(), (response) => response.clone());
+          }
+
+          const response = store.get(resolveRequestKey(request));
+          return response ? [response.clone()] : [];
+        },
+        async put(request: RequestInfo | URL, response: Response) {
+          store.set(resolveRequestKey(request), response.clone());
+        },
+      } as unknown as Cache;
+    },
+  } as CacheStorage;
+}
+
 beforeEach(() => {
+  __resetPlaybackPrimingForTests();
   Object.defineProperty(globalThis, 'localStorage', {
     configurable: true,
     value: createStorageMock(),
+  });
+  Object.defineProperty(globalThis, 'caches', {
+    configurable: true,
+    value: createCacheStorageMock(),
   });
   localStorage.setItem('openai_api_key', 'test-key');
 });
 
 afterEach(() => {
+  __resetPlaybackPrimingForTests();
   globalThis.fetch = originalFetch;
   Object.defineProperty(globalThis, 'localStorage', {
     configurable: true,
     value: originalLocalStorage,
+  });
+  Object.defineProperty(globalThis, 'caches', {
+    configurable: true,
+    value: originalCaches,
   });
 });
 
@@ -62,6 +150,39 @@ test('textToSpeech retries once when first response is transient server error', 
 
   assert.equal(calls, 2);
   assert.equal(await audio.text(), 'ok-audio');
+});
+
+test('textToSpeech stores generated audio locally and reuses it on the next call', async () => {
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    return new Response(new Blob(['cached-audio']), { status: 200 });
+  }) as typeof fetch;
+
+  const firstAudio = await textToSpeech('ciao');
+  const secondAudio = await textToSpeech('ciao');
+
+  assert.equal(calls, 1);
+  assert.equal(await firstAudio.text(), 'cached-audio');
+  assert.equal(await secondAudio.text(), 'cached-audio');
+});
+
+test('textToSpeech deduplicates in-flight requests for the same text and voice', async () => {
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    return new Response(new Blob(['shared-audio']), { status: 200 });
+  }) as typeof fetch;
+
+  const [firstAudio, secondAudio] = await Promise.all([
+    textToSpeech('same line', { voice: 'fable' }),
+    textToSpeech('same line', { voice: 'fable' }),
+  ]);
+
+  assert.equal(calls, 1);
+  assert.equal(await firstAudio.text(), 'shared-audio');
+  assert.equal(await secondAudio.text(), 'shared-audio');
 });
 
 test('speechToText retries once on network error', async () => {
