@@ -48,6 +48,29 @@ test.describe('rehearsal browser e2e', () => {
     await expect(page.getByTestId('button-next')).toBeVisible();
   });
 
+  test('still scores a line when the recorder has already gone inactive before stop is requested', async ({
+    page,
+  }) => {
+    await setupRehearsalApp(page, {
+      mediaRecorderAutoStopDelayMs: 50,
+      script: PARTNER_LEAD_SCRIPT,
+      selectedCharacter: 'BOB',
+      transcriptionText: 'My cue line.',
+    });
+
+    await page.getByTestId('button-start-rehearsal').click();
+    await expect(page.getByTestId('line-1')).toContainText('Recall your line...');
+
+    await page.getByTestId('button-record').click();
+    await expect(page.getByTestId('button-stop-recording')).toBeVisible();
+    await page.waitForTimeout(100);
+    await page.getByTestId('button-stop-recording').click({ force: true });
+
+    await expect(page.getByTestId('line-1')).toContainText('100%');
+    await expect(page.getByTestId('line-1')).toContainText('Transcribed');
+    await expect(page.getByTestId('line-1')).toContainText('My cue line.');
+  });
+
   test('ignores duplicate start requests while microphone access is still pending', async ({
     page,
   }) => {

@@ -1172,13 +1172,13 @@ export default function RehearsalPage() {
     addDebugLog('Recording Stopped', 'Processing user audio');
     
     try {
+      const audioBlob = await stopRecording();
       void primeAudioPlayback().catch((error) => {
         addDebugLog(
           'Audio Priming Error',
           `Stop recording: ${error instanceof Error ? error.message : 'Audio playback priming failed'}`,
         );
       });
-      const audioBlob = await stopRecording();
       const idx = currentLineIndexRef.current;
       const currentLine = rehearsalLinesRef.current[idx];
       if (!currentLine || !script) {

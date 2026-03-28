@@ -19,6 +19,7 @@ export interface RehearsalAppOptions {
   autoSpeakCorrections?: boolean;
   carMode?: boolean;
   latestVersion?: string;
+  mediaRecorderAutoStopDelayMs?: number;
   microphoneMode?: MicrophoneMode;
   rejectAudioPlayCallNumber?: number;
   script?: MockScript;
@@ -58,6 +59,7 @@ export async function setupRehearsalApp(
     autoSpeakCorrections = true,
     carMode = false,
     latestVersion = '1.0.12',
+    mediaRecorderAutoStopDelayMs = -1,
     microphoneMode = 'normal',
     rejectAudioPlayCallNumber = -1,
     script = PARTNER_LEAD_SCRIPT,
@@ -71,6 +73,7 @@ export async function setupRehearsalApp(
       apiKey: initApiKey,
       autoSpeakCorrections: initAutoSpeakCorrections,
       carMode: initCarMode,
+      mediaRecorderAutoStopDelayMs: initMediaRecorderAutoStopDelayMs,
       microphoneMode: initMicrophoneMode,
       rejectAudioPlayCallNumber: initRejectAudioPlayCallNumber,
       selectedCharacter: initSelectedCharacter,
@@ -278,6 +281,19 @@ export async function setupRehearsalApp(
 
         start() {
           this.state = 'recording';
+
+          if (initMediaRecorderAutoStopDelayMs >= 0) {
+            setTimeout(() => {
+              if (this.state !== 'recording') {
+                return;
+              }
+
+              this.state = 'inactive';
+              const blob = new Blob(['playwright-audio'], { type: this.mimeType });
+              this.ondataavailable?.({ data: blob });
+              this.onstop?.(new Event('stop'));
+            }, initMediaRecorderAutoStopDelayMs);
+          }
         }
 
         stop() {
@@ -335,6 +351,7 @@ export async function setupRehearsalApp(
       apiKey,
       autoSpeakCorrections,
       carMode,
+      mediaRecorderAutoStopDelayMs,
       microphoneMode,
       rejectAudioPlayCallNumber,
       selectedCharacter,

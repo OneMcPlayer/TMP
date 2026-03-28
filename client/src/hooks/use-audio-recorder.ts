@@ -18,6 +18,18 @@ interface UseAudioRecorderOptions {
 
 export const NO_SPEECH_DETECTED_ERROR = 'No speech detected before auto-stop';
 export const NO_AUDIO_CAPTURED_ERROR = 'No audio captured';
+const STOP_RECORDING_FALLBACK_TIMEOUT_MS = 250;
+
+interface CompletedRecording {
+  blob: Blob;
+  captureError: string | null;
+}
+
+interface PendingStopRequest {
+  resolve: (blob: Blob) => void;
+  reject: (error: Error) => void;
+  timeoutId: ReturnType<typeof globalThis.setTimeout> | null;
+}
 
 export function hasLiveAudioTracks(
   stream: Pick<MediaStream, 'getTracks'> | null | undefined,
@@ -110,6 +122,9 @@ export function useAudioRecorder(
   const silenceTriggeredRef = useRef(false);
   const detectedSpeechRef = useRef(false);
   const isStartingRef = useRef(false);
+  const completedRecordingRef = useRef<CompletedRecording | null>(null);
+  const pendingStopRequestRef = useRef<PendingStopRequest | null>(null);
+  const stopRequestedRef = useRef(false);
 
   const stopStreamTracks = useCallback((stream: Pick<MediaStream, 'getTracks'> | null | undefined) => {
     stream?.getTracks().forEach((track) => track.stop());
@@ -131,6 +146,55 @@ export function useAudioRecorder(
       audioContextRef.current = null;
     }
   }, []);
+
+  const clearPendingStopRequest = useCallback(() => {
+    const pendingStopRequest = pendingStopRequestRef.current;
+    if (pendingStopRequest && pendingStopRequest.timeoutId !== null) {
+      globalThis.clearTimeout(pendingStopRequest.timeoutId);
+    }
+
+    pendingStopRequestRef.current = null;
+  }, []);
+
+  const consumeCompletedRecording = useCallback((): CompletedRecording | null => {
+    const completedRecording = completedRecordingRef.current;
+    completedRecordingRef.current = null;
+    return completedRecording;
+  }, []);
+
+  const resolveStopRequest = useCallback((completedRecording: CompletedRecording): boolean => {
+    const pendingStopRequest = pendingStopRequestRef.current;
+    if (!pendingStopRequest) {
+      return false;
+    }
+
+    clearPendingStopRequest();
+
+    if (completedRecording.captureError) {
+      pendingStopRequest.reject(new Error(completedRecording.captureError));
+      return true;
+    }
+
+    pendingStopRequest.resolve(completedRecording.blob);
+    return true;
+  }, [clearPendingStopRequest]);
+
+  const buildCompletedRecording = useCallback(
+    (mediaRecorder: Pick<MediaRecorder, 'mimeType'>): CompletedRecording => {
+      const blob = new Blob(chunksRef.current, { type: mediaRecorder.mimeType });
+      const captureError = getRecordingCaptureError({
+        blobSize: blob.size,
+        detectedSpeech: detectedSpeechRef.current,
+        silenceTriggered: silenceTriggeredRef.current,
+      });
+
+      return {
+        blob,
+        captureError,
+      };
+    },
+    [],
+  );
 
   const releasePreparedRecordingSession = useCallback(() => {
     const preparedStream = preparedStreamRef.current;
@@ -168,6 +232,7 @@ export function useAudioRecorder(
     mediaRecorderRef.current = null;
     chunksRef.current = [];
     activeStreamShouldPersistRef.current = false;
+    stopRequestedRef.current = false;
     setIsRecording(false);
   }, [stopSilenceMonitor, stopStreamTracks]);
 
@@ -205,8 +270,11 @@ export function useAudioRecorder(
     try {
       setError(null);
       chunksRef.current = [];
+      completedRecordingRef.current = null;
+      clearPendingStopRequest();
       detectedSpeechRef.current = false;
       silenceTriggeredRef.current = false;
+      stopRequestedRef.current = false;
 
       if (options.carMode) {
         if (hasLiveAudioTracks(preparedStreamRef.current)) {
@@ -290,6 +358,20 @@ export function useAudioRecorder(
         }
       };
 
+      mediaRecorder.onstop = () => {
+        const completedRecording = buildCompletedRecording(mediaRecorder);
+        const shouldResolveStopRequest =
+          stopRequestedRef.current || pendingStopRequestRef.current !== null;
+
+        if (shouldResolveStopRequest) {
+          cleanupRecordingResources();
+          resolveStopRequest(completedRecording);
+          return;
+        }
+
+        completedRecordingRef.current = completedRecording;
+      };
+
       mediaRecorder.start(100);
       setIsRecording(true);
       return true;
@@ -304,41 +386,72 @@ export function useAudioRecorder(
       activeStreamShouldPersistRef.current = false;
       mediaRecorderRef.current = null;
       chunksRef.current = [];
+      completedRecordingRef.current = null;
+      clearPendingStopRequest();
+      stopRequestedRef.current = false;
       throw err;
     } finally {
       isStartingRef.current = false;
     }
-  }, [options.carMode, options.onSilenceTimeout, silenceTimeoutMs, stopSilenceMonitor, stopStreamTracks]);
+  }, [
+    buildCompletedRecording,
+    cleanupRecordingResources,
+    clearPendingStopRequest,
+    options.carMode,
+    options.onSilenceTimeout,
+    resolveStopRequest,
+    silenceTimeoutMs,
+    stopSilenceMonitor,
+    stopStreamTracks,
+  ]);
 
   const stopRecording = useCallback(async (): Promise<Blob> => {
     return new Promise((resolve, reject) => {
+      const completedRecording = consumeCompletedRecording();
+      if (completedRecording) {
+        cleanupRecordingResources();
+
+        if (completedRecording.captureError) {
+          reject(new Error(completedRecording.captureError));
+          return;
+        }
+
+        resolve(completedRecording.blob);
+        return;
+      }
+
       const mediaRecorder = mediaRecorderRef.current;
-      
-      if (!mediaRecorder || mediaRecorder.state === 'inactive') {
+
+      if (!mediaRecorder) {
         reject(new Error('No active recording'));
         return;
       }
 
-      mediaRecorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: mediaRecorder.mimeType });
-        const captureError = getRecordingCaptureError({
-          blobSize: blob.size,
-          detectedSpeech: detectedSpeechRef.current,
-          silenceTriggered: silenceTriggeredRef.current,
-        });
-        cleanupRecordingResources();
-
-        if (captureError) {
-          reject(new Error(captureError));
+      const timeoutId = globalThis.setTimeout(() => {
+        const pendingStopRequest = pendingStopRequestRef.current;
+        if (!pendingStopRequest || pendingStopRequest.resolve !== resolve) {
           return;
         }
 
-        resolve(blob);
+        clearPendingStopRequest();
+        cleanupRecordingResources();
+        reject(new Error('No active recording'));
+      }, STOP_RECORDING_FALLBACK_TIMEOUT_MS);
+
+      pendingStopRequestRef.current = {
+        resolve,
+        reject,
+        timeoutId,
       };
 
+      if (mediaRecorder.state === 'inactive') {
+        return;
+      }
+
+      stopRequestedRef.current = true;
       mediaRecorder.stop();
     });
-  }, [cleanupRecordingResources]);
+  }, [cleanupRecordingResources, clearPendingStopRequest, consumeCompletedRecording]);
 
   useEffect(() => {
     if (!options.carMode) {
@@ -348,9 +461,10 @@ export function useAudioRecorder(
 
   useEffect(() => {
     return () => {
+      clearPendingStopRequest();
       releasePreparedRecordingSession();
     };
-  }, [releasePreparedRecordingSession]);
+  }, [clearPendingStopRequest, releasePreparedRecordingSession]);
 
   return {
     isRecording,
