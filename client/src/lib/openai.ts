@@ -7,6 +7,7 @@ const TTS_RESPONSE_FORMAT = 'mp3';
 const API_REQUEST_TIMEOUT_MS = 15_000;
 const MAX_API_RETRY_ATTEMPTS = 1;
 const PLAYBACK_PRIMING_TIMEOUT_MS = 1_500;
+const RECORDING_START_CUE_TIMEOUT_MS = 750;
 // A short silent clip is more reliable on iOS PWAs than an empty WAV header.
 const SILENT_WAV_DATA_URI =
   'data:audio/wav;base64,' +
@@ -25,6 +26,32 @@ const SILENT_WAV_DATA_URI =
   'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' +
   'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' +
   'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==';
+const RECORDING_START_CUE_DATA_URI =
+  'data:audio/wav;base64,' +
+  'UklGRiQFAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAFAAAAAIMAkgEaAi4BxP7z' +
+  '+3L6nvuM/7QEhgiwCG4EN/1L9jrzFvYy/iUINw+fD3sIjfw18QDs+e/0+8oKkhXTFkoNy/zB7Nvk' +
+  'WenX+JoMghs4Hs8S/v0Y6kHg++Qd9sgLChxvH2YUAACa65Hg9uM49OMJBRu/H+gVAgIx7QLhDONg' +
+  '8vUH4xnwH1QXAwTb7pHhQOKW8P8FqBgAIKgY/wWW8EDikeHb7gMEVBfwH+MZ9Qdg8gzjAuEx7QIC' +
+  '6BW/HwUb4wk49PbjkeCa6wAAZhRvHwocyAsd9vvkQeAY6v79zxL+HvQcoA0L+B3mEOCs6P37JRFv' +
+  'HsAdag8B+ljnAOBY5wH6ag/AHW8eJRH9+6zoEOAd5gv4oA30HP4ezxL+/RjqQeD75B32yAsKHG8f' +
+  'ZhQAAJrrkeD24zj04wkFG78f6BUCAjHtAuEM42Dy9QfjGfAfVBcDBNvukeFA4pbw/wWoGAAgqBj/' +
+  'BZbwQOKR4dvuAwRUF/Af4xn1B2DyDOMC4THtAgLoFb8fBRvjCTj09uOR4JrrAABmFG8fChzICx32' +
+  '++RB4Bjq/v3PEv4e9BygDQv4HeYQ4Kzo/fslEW8ewB1qDwH6WOcA4FjnAfpqD8Adbx4lEf37rOgQ' +
+  '4B3mC/igDfQc/h7PEv79GOpB4PvkHfbICwocbx9mFAAAmuuR4PbjOPTjCQUbvx/oFQICMe0C4Qzj' +
+  'YPL1B+MZ8B9UFwME2+6R4UDilvD/BagYACCoGP8FlvBA4pHh2+4DBFQX8B/jGfUHYPIM4wLhMe0C' +
+  'AugVvx8FG+MJOPT245HgmusAAGYUbx8KHMgLHfb75EHgGOr+/c8S/h70HKANC/gd5hDgrOj9+yUR' +
+  'bx7AHWoPAfpY5wDgWOcB+moPwB1vHiUR/fus6BDgHeYL+KAN9Bz+Hs8S/v0Y6kHg++Qd9sgLChxv' +
+  'H2YUAACa65Hg9uM49OMJBRu/H+gVAgIx7QLhDONg8vUH4xnwH1QXAwTb7pHhQOKW8P8FqBgAIKgY' +
+  '/wWW8EDikeHb7gMEVBfwH+MZ9Qdg8gzjAuEx7QIC6BW/HwUb4wk49PbjkeCa6wAAZhRvHwocyAsd' +
+  '9vvkQeAY6v79zxL+HvQcoA0L+B3mEOCs6P37JRFvHsAdag8B+ljnAOBY5wH6ag/AHW8eJRH9+6zo' +
+  'EOAd5gv4oA30HP4ezxL+/RjqQeD75B32yAsKHG8fZhQAAJrrkeD24zj04wkFG78f6BUCAjHtAuEM' +
+  '42Dy9QfjGfAfVBcDBNvukeFA4pbw/wWoGAAgqBj/BZbwQOKR4dvuAwRUF/Af4xn1B2DyDOMC4THt' +
+  'AgLoFb8fBRvjCTj09uOR4JrrAABmFG8fChzICx32++RB4Bjq/v3PEv4e9BygDQv4HeYQ4Kzo/fsl' +
+  'EW8ewB1qDwH6WOcA4FjnAfpqD8Adbx4lEf37rOgQ4B3mC/igDfQc/h7PEv79GOpB4PvkHfbICwoc' +
+  'bx9mFAAAmuuR4PbjOPTjCQUbvx/oFQICMe0C4QzjYPL1B+MZ8B9UFwME2+6R4UDilvD/BagYACCo' +
+  'GP8FlvBA4pHh2+4DBFQX8B/jGfUHYPIM4wLhMe0CAugVvx8FG+MJOPT245HgmusAAOMT3B3wGZoK' +
+  'WfcJ6c/leu5x/hsOeBZEFDIJ1PrS79fslvLL/QAJNw8iDvAGdP0j9gD0X/cN/qAELwicB9wDM//r' +
+  '+zb7xPw0/wYBcwHGAA==';
 
 let playbackPrimingPromise: Promise<void> | null = null;
 let playbackAudioElement: HTMLAudioElement | null = null;
@@ -315,6 +342,62 @@ export function primeAudioPlayback(timeoutMs: number = PLAYBACK_PRIMING_TIMEOUT_
   })();
 
   return playbackPrimingPromise;
+}
+
+export function playRecordingStartCue(
+  timeoutMs: number = RECORDING_START_CUE_TIMEOUT_MS,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const audio = getPlaybackAudioElement();
+    let settled = false;
+
+    clearActivePlaybackObjectUrl();
+    audio.pause();
+    audio.onended = null;
+    audio.onerror = null;
+    audio.src = RECORDING_START_CUE_DATA_URI;
+    audio.load();
+
+    const timeoutId = globalThis.setTimeout(() => {
+      finalize(() => {
+        reject(new Error(`Recording start cue timed out after ${timeoutMs}ms`));
+      });
+    }, timeoutMs);
+
+    const finalize = (callback: () => void) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      globalThis.clearTimeout(timeoutId);
+      audio.onended = null;
+      audio.onerror = null;
+      callback();
+    };
+
+    audio.onended = () => {
+      audio.pause();
+      audio.currentTime = 0;
+      finalize(resolve);
+    };
+
+    audio.onerror = () => {
+      finalize(() => {
+        reject(new Error('Recording start cue failed'));
+      });
+    };
+
+    audio.play().catch((error) => {
+      if (isRetryableNetworkError(error) || (error instanceof DOMException && error.name === 'NotAllowedError')) {
+        playbackPrimingPromise = null;
+      }
+
+      finalize(() => {
+        reject(error);
+      });
+    });
+  });
 }
 
 export function playAudioBlob(blob: Blob): Promise<void> {

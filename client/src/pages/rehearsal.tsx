@@ -25,6 +25,7 @@ import {
   speechToText,
   playAudioBlob,
   getApiKey,
+  playRecordingStartCue,
   primeAudioPlayback,
 } from '@/lib/openai';
 import { computeWordDiff, calculateAccuracy } from '@/lib/word-diff';
@@ -64,7 +65,6 @@ import { Textarea } from '@/components/ui/textarea';
 
 const PREFERENCES_STORAGE_KEY = 'rehearsal_preferences';
 const TRACK_NAVIGATION_STATES: RehearsalState[] = ['waiting-for-user', 'showing-feedback'];
-const CAR_MODE_AUTO_START_DELAY_MS = 1000;
 const INITIAL_AUDIO_PREFETCH_COUNT = 5;
 const LOOKAHEAD_AUDIO_PREFETCH_COUNT = 3;
 
@@ -163,7 +163,6 @@ export default function RehearsalPage() {
   const initialPreferences = useRef<PracticePreferences>(loadPreferences());
   const [carMode, setCarMode] = useState(initialPreferences.current.carMode);
   const isStoppingRecordingRef = useRef(false);
-  const isAutoStartingRecordingRef = useRef(false);
   const onSilenceTimeoutRef = useRef<(() => void) | null>(null);
   const {
     prepareRecordingSession,
@@ -191,7 +190,7 @@ export default function RehearsalPage() {
   const [rehearsalState, setRehearsalState] = useState<RehearsalState>('idle');
   const [hasStarted, setHasStarted] = useState(false);
   const [isComplete, setIsComplete] = useState(false);
-  const [showSetup, setShowSetup] = useState(true);
+  const [showSetup, setShowSetup] = useState(false);
   const [hasCompletedDeviceSetup, setHasCompletedDeviceSetup] = useState(false);
   const [isPreparingDevice, setIsPreparingDevice] = useState(false);
   const [microphoneSetupStatus, setMicrophoneSetupStatus] = useState<DeviceSetupStatus>('idle');
@@ -222,6 +221,7 @@ export default function RehearsalPage() {
   const lastAppliedAudioSessionTypeRef = useRef<string | null>(null);
   const pendingAudioRecoveryRef = useRef<PendingAudioRecovery | null>(null);
   const lastSelectedModeRef = useRef(carMode);
+  const discardActiveRecordingRef = useRef(false);
 
   useEffect(() => {
     rehearsalLinesRef.current = rehearsalLines;
@@ -1167,6 +1167,15 @@ export default function RehearsalPage() {
         );
       }
 
+      if (carMode) {
+        await playRecordingStartCue().catch((error) => {
+          addDebugLog(
+            'Recording Start Cue Error',
+            error instanceof Error ? error.message : 'Recording start cue failed',
+          );
+        });
+      }
+
       const didStartRecording = await startRecordingTransition({
         startRecording,
         primeAudioPlayback,
@@ -1199,7 +1208,9 @@ export default function RehearsalPage() {
     }
   }, [
     addDebugLog,
+    carMode,
     clearCarModeAutoStartTimeout,
+    playRecordingStartCue,
     primeAudioPlayback,
     startRecording,
     toast,
@@ -1216,6 +1227,12 @@ export default function RehearsalPage() {
     
     try {
       const audioBlob = await stopRecording();
+      if (discardActiveRecordingRef.current) {
+        discardActiveRecordingRef.current = false;
+        updateRehearsalState('idle');
+        return;
+      }
+
       void primeAudioPlayback().catch((error) => {
         addDebugLog(
           'Audio Priming Error',
@@ -1260,6 +1277,12 @@ export default function RehearsalPage() {
         updateRehearsalState('showing-feedback');
       }
     } catch (err) {
+      if (discardActiveRecordingRef.current) {
+        discardActiveRecordingRef.current = false;
+        updateRehearsalState('idle');
+        return;
+      }
+
       const errorMessage = err instanceof Error ? err.message : 'Failed to transcribe audio';
 
       if (errorMessage === NO_SPEECH_DETECTED_ERROR) {
@@ -1316,57 +1339,6 @@ export default function RehearsalPage() {
       void handleStopRecording();
     };
   }, [addDebugLog, carMode, handleStopRecording, isRecording]);
-
-  useEffect(() => {
-    clearCarModeAutoStartTimeout();
-
-    if (
-      !carMode ||
-      !hasStarted ||
-      isComplete ||
-      rehearsalState !== 'waiting-for-user' ||
-      isRecording ||
-      isStartingRecordingRef.current ||
-      isAutoStartingRecordingRef.current ||
-      isStoppingRecordingRef.current
-    ) {
-      return;
-    }
-
-    carModeAutoStartTimeoutRef.current = window.setTimeout(() => {
-      carModeAutoStartTimeoutRef.current = null;
-
-      if (
-        rehearsalStateRef.current !== 'waiting-for-user' ||
-        isRecordingRef.current ||
-        isStartingRecordingRef.current ||
-        isAutoStartingRecordingRef.current ||
-        isStoppingRecordingRef.current
-      ) {
-        return;
-      }
-
-      isAutoStartingRecordingRef.current = true;
-      addDebugLog(
-        'Car Mode Auto-Start',
-        `Automatically restarting recording after ${CAR_MODE_AUTO_START_DELAY_MS}ms`,
-      );
-      void handleStartRecording().finally(() => {
-        isAutoStartingRecordingRef.current = false;
-      });
-    }, CAR_MODE_AUTO_START_DELAY_MS);
-
-    return clearCarModeAutoStartTimeout;
-  }, [
-    addDebugLog,
-    carMode,
-    clearCarModeAutoStartTimeout,
-    handleStartRecording,
-    hasStarted,
-    isComplete,
-    isRecording,
-    rehearsalState,
-  ]);
 
   const handleReplayExpectedLine = useCallback(async () => {
     clearAudioRecovery();
@@ -1479,12 +1451,33 @@ export default function RehearsalPage() {
     updateRehearsalState('showing-feedback');
   }, [addDebugLog, clearAudioRecovery, clearCarModeAutoStartTimeout, updateRehearsalState]);
 
-  const handleRestart = useCallback(() => {
+  const handleRestart = useCallback(async () => {
     clearCarModeAutoStartTimeout();
     clearAudioRecovery();
     clearCorrectionAudioCache();
     clearPrefetchedAudioIndexes();
-    setShowSetup(true);
+    setShowSetup(false);
+
+    if (isRecordingRef.current || isStoppingRecordingRef.current) {
+      discardActiveRecordingRef.current = true;
+
+      if (!isStoppingRecordingRef.current) {
+        isStoppingRecordingRef.current = true;
+        try {
+          await stopRecording();
+          addDebugLog('Recording Discarded', 'Active recording stopped during session restart');
+        } catch (error) {
+          addDebugLog(
+            'Recording Discarded',
+            error instanceof Error ? error.message : 'Active recording stopped during session restart',
+          );
+        } finally {
+          discardActiveRecordingRef.current = false;
+          isStoppingRecordingRef.current = false;
+        }
+      }
+    }
+
     addDebugLog('Session Restarted');
     if (script && selectedCharacter) {
       const lines = buildRehearsalLines(script, selectedCharacter);
@@ -1502,6 +1495,7 @@ export default function RehearsalPage() {
     clearPrefetchedAudioIndexes,
     script,
     selectedCharacter,
+    stopRecording,
     updateRehearsalState,
   ]);
 
@@ -1516,12 +1510,27 @@ export default function RehearsalPage() {
   }, [addDebugLog, processLine]);
 
   const handleToggleSetup = useCallback(() => {
-    if (carMode) {
+    if (carMode && hasStarted) {
       return;
     }
 
     setShowSetup(prev => !prev);
-  }, [carMode]);
+  }, [carMode, hasStarted]);
+
+  const handleCarModePlayOrNext = useCallback(() => {
+    const activeLine = rehearsalLinesRef.current[currentLineIndexRef.current];
+
+    if (
+      rehearsalStateRef.current === 'waiting-for-user' &&
+      activeLine?.isUserLine &&
+      !isRecordingRef.current
+    ) {
+      void handleStartRecording();
+      return;
+    }
+
+    handleNext();
+  }, [handleNext, handleStartRecording]);
 
   const handleCopyDebugLogs = useCallback(async () => {
     try {
@@ -1606,7 +1615,7 @@ export default function RehearsalPage() {
         ? 'playing'
         : 'paused';
 
-    setMediaSessionActionHandler('nexttrack', handleNext);
+    setMediaSessionActionHandler('nexttrack', handleCarModePlayOrNext);
     setMediaSessionActionHandler('previoustrack', handlePrevious);
     setMediaSessionActionHandler('play', () => {
       if (rehearsalStateRef.current === 'waiting-for-user' && !isRecordingRef.current) {
@@ -1634,9 +1643,9 @@ export default function RehearsalPage() {
   }, [
     carMode,
     currentLine,
+    handleCarModePlayOrNext,
     handleStartRecording,
     handleStopRecording,
-    handleNext,
     handlePrevious,
     hasStarted,
     isComplete,
@@ -1685,7 +1694,7 @@ export default function RehearsalPage() {
             <span className="font-serif font-semibold text-lg">Rehearsal Partner</span>
           </div>
           <div className="flex items-center gap-2">
-            {hasStarted && !carMode && (
+            {(!hasStarted || !carMode) && (
               <Button
                 data-testid="button-toggle-setup"
                 size="icon"
@@ -1748,7 +1757,7 @@ export default function RehearsalPage() {
           />
         )}
 
-        {showSetup && hasStarted && !carMode && (
+        {showSetup && (!hasStarted || !carMode) && (
           <div className="p-4 space-y-4">
             <div className="grid gap-4 md:grid-cols-3">
               <ApiKeyInput onKeyChange={setHasApiKey} />

@@ -58,7 +58,23 @@ function getPrimaryInstruction(
     return 'Use next track to move on or previous track to revisit the cue.';
   }
 
+  if (currentLine.isUserLine) {
+    return 'Press Tap To Speak, or use play or next track on your steering wheel or headset to begin listening.';
+  }
+
   return 'Use steering-wheel or headset track buttons to repeat or skip when supported.';
+}
+
+function getNextControlDescription(
+  currentLine: RehearsalLine | null,
+  rehearsalState: RehearsalState,
+  canGoNext: boolean,
+): string {
+  if (rehearsalState === 'waiting-for-user' && currentLine?.isUserLine) {
+    return 'Play or next starts listening';
+  }
+
+  return canGoNext ? 'Skip ahead' : 'Wait for cue';
 }
 
 function getStateIcon(rehearsalState: RehearsalState) {
@@ -177,7 +193,7 @@ export function CarModeStage({
               <ArrowRight className="mx-auto mb-1 h-4 w-4 text-primary" />
               <p className="text-xs font-semibold">Next</p>
               <p className="text-[11px] text-muted-foreground">
-                {canGoNext ? 'Skip ahead' : 'Wait for cue'}
+                {getNextControlDescription(currentLine, rehearsalState, canGoNext)}
               </p>
             </div>
           </div>

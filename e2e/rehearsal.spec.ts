@@ -9,6 +9,20 @@ import {
 } from './helpers/rehearsal-app';
 
 test.describe('rehearsal browser e2e', () => {
+  test('keeps the settings button available on the launch screen', async ({ page }) => {
+    await setupRehearsalApp(page, {
+      script: PARTNER_LEAD_SCRIPT,
+      selectedCharacter: 'BOB',
+    });
+
+    const settingsButton = page.getByTestId('button-toggle-setup');
+    await expect(settingsButton).toBeVisible();
+    await settingsButton.click();
+    await expect(page.getByText('Debug Logs')).toBeVisible();
+    await settingsButton.click();
+    await expect(page.getByText('Debug Logs')).toBeHidden();
+  });
+
   test('lets you choose a character and advances from partner speech to your cue', async ({
     page,
   }) => {
@@ -130,6 +144,7 @@ test.describe('rehearsal browser e2e', () => {
       carMode: true,
       script: CAR_MODE_SCRIPT,
       selectedCharacter: 'BOB',
+      transcriptionText: 'First solo cue.',
     });
 
     await completeDeviceSetup(page);
@@ -162,6 +177,27 @@ test.describe('rehearsal browser e2e', () => {
         ),
       )
       .toBeGreaterThan(0);
+    await page.waitForTimeout(1200);
+    await expect(page.getByTestId('button-record')).toBeVisible();
+    await expect(page.getByTestId('button-stop-recording')).toBeHidden();
+
+    await page.evaluate(() => {
+      (
+        window as Window & {
+          __e2eMediaSessionHandlers?: Record<string, (() => void) | null>;
+        }
+      ).__e2eMediaSessionHandlers?.nexttrack?.();
+    });
+
+    await expect(page.getByTestId('button-stop-recording')).toBeVisible();
+    await page.evaluate(() => {
+      (
+        window as Window & {
+          __e2eMediaSessionHandlers?: Record<string, (() => void) | null>;
+        }
+      ).__e2eMediaSessionHandlers?.stop?.();
+    });
+    await expect(page.getByTestId('car-mode-stage')).toContainText('100% matched');
 
     await page.evaluate(() => {
       (
@@ -226,6 +262,8 @@ test.describe('rehearsal browser e2e', () => {
       .toBe(1);
 
     await page.getByTestId('button-start-rehearsal').click();
+    await expect(page.getByTestId('button-record')).toBeVisible();
+    await page.getByTestId('button-record').click();
     await expect(page.getByTestId('button-stop-recording')).toBeVisible();
 
     await expect

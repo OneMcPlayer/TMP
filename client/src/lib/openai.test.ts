@@ -4,6 +4,7 @@ import { afterEach, beforeEach, test } from 'node:test';
 import {
   __resetPlaybackPrimingForTests,
   playAudioBlob,
+  playRecordingStartCue,
   primeAudioPlayback,
 } from './openai';
 
@@ -155,4 +156,13 @@ test('playAudioBlob clears priming so a user gesture can re-prime after autoplay
 
   assert.equal(MockAudio.instances.length, 1);
   assert.equal(MockAudio.instances[0].playCalls, 3);
+});
+
+test('playRecordingStartCue reuses the primed audio element for the short recording beep', async () => {
+  await primeAudioPlayback();
+  await playRecordingStartCue();
+
+  assert.equal(MockAudio.instances.length, 1);
+  assert.equal(MockAudio.instances[0].playCalls, 2);
+  assert.match(MockAudio.instances[0].src, /^data:audio\/wav;base64,/);
 });
