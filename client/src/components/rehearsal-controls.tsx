@@ -76,6 +76,14 @@ export function RehearsalControls({
     'flex gap-3 items-stretch',
     carMode ? 'flex-col' : 'flex-col sm:flex-row sm:flex-wrap sm:justify-center',
   );
+  const carModeHardwareHint =
+    state === 'recording'
+      ? 'Use your car or headset play, pause, or stop control to finish recording.'
+      : state === 'showing-feedback'
+      ? 'Use previous song to replay. Use next song to continue.'
+      : state === 'waiting-for-user'
+      ? 'Use play or next song on your car or headset to start listening.'
+      : 'Use your car or headset song controls to keep moving through the scene.';
 
   if (isComplete) {
     return (
@@ -117,11 +125,24 @@ export function RehearsalControls({
     );
   }
 
+  if (carMode) {
+    return (
+      <div className="rounded-lg bg-card px-4 py-5 text-center">
+        <p className="text-sm font-medium text-foreground">
+          Use your car controls
+        </p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {carModeHardwareHint}
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div
       className={cn(
         'p-4 bg-card rounded-lg',
-        carMode ? 'space-y-3' : 'flex items-center justify-center gap-4',
+        'flex items-center justify-center gap-4',
       )}
     >
       {state === 'waiting-for-user' && (

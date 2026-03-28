@@ -148,10 +148,14 @@ test.describe('rehearsal browser e2e', () => {
     });
 
     await completeDeviceSetup(page);
+    await expect(page.getByText('Device Ready')).toBeHidden();
     await page.getByTestId('button-start-rehearsal').click();
     await expect(page.getByTestId('button-toggle-setup')).toBeHidden();
     await expect(page.getByTestId('button-end-session')).toBeVisible();
     await expect(page.getByTestId('car-mode-stage')).toBeVisible();
+    await expect(page.getByTestId('car-mode-stage')).toContainText('Listening');
+    await expect(page.getByTestId('car-mode-stage')).not.toContainText('First solo cue.');
+    await expect(page.getByText('Use your car controls')).toBeVisible();
     await expect
       .poll(() =>
         page.evaluate(() =>
@@ -178,8 +182,8 @@ test.describe('rehearsal browser e2e', () => {
       )
       .toBeGreaterThan(0);
     await page.waitForTimeout(1200);
-    await expect(page.getByTestId('button-record')).toBeVisible();
-    await expect(page.getByTestId('button-stop-recording')).toBeHidden();
+    await expect(page.getByTestId('button-record')).toHaveCount(0);
+    await expect(page.getByTestId('button-stop-recording')).toHaveCount(0);
 
     await page.evaluate(() => {
       (
@@ -189,7 +193,7 @@ test.describe('rehearsal browser e2e', () => {
       ).__e2eMediaSessionHandlers?.nexttrack?.();
     });
 
-    await expect(page.getByTestId('button-stop-recording')).toBeVisible();
+    await expect(page.getByTestId('car-mode-stage')).toContainText('Recording');
     await page.evaluate(() => {
       (
         window as Window & {
@@ -197,7 +201,7 @@ test.describe('rehearsal browser e2e', () => {
         }
       ).__e2eMediaSessionHandlers?.stop?.();
     });
-    await expect(page.getByTestId('car-mode-stage')).toContainText('100% matched');
+    await expect(page.getByTestId('car-mode-stage')).toContainText('Ready');
 
     await page.evaluate(() => {
       (
@@ -207,8 +211,24 @@ test.describe('rehearsal browser e2e', () => {
       ).__e2eMediaSessionHandlers?.nexttrack?.();
     });
 
-    await expect(page.getByTestId('car-mode-stage')).toContainText('Second solo cue.');
-    await expect(page.getByTestId('car-mode-stage')).toContainText('Line 2');
+    await expect
+      .poll(
+        () =>
+          page.evaluate(
+            () =>
+              (
+                navigator as Navigator & {
+                  mediaSession?: {
+                    metadata?: {
+                      album?: string;
+                    } | null;
+                  };
+                }
+              ).mediaSession?.metadata?.album ?? null,
+          ),
+      )
+      .toBe('Line 2: BOB');
+    await expect(page.getByTestId('car-mode-stage')).toContainText('Listening');
 
     await page.evaluate(() => {
       (
@@ -218,8 +238,24 @@ test.describe('rehearsal browser e2e', () => {
       ).__e2eMediaSessionHandlers?.previoustrack?.();
     });
 
-    await expect(page.getByTestId('car-mode-stage')).toContainText('First solo cue.');
-    await expect(page.getByTestId('car-mode-stage')).toContainText('Line 1');
+    await expect
+      .poll(
+        () =>
+          page.evaluate(
+            () =>
+              (
+                navigator as Navigator & {
+                  mediaSession?: {
+                    metadata?: {
+                      album?: string;
+                    } | null;
+                  };
+                }
+              ).mediaSession?.metadata?.album ?? null,
+          ),
+      )
+      .toBe('Line 1: BOB');
+    await expect(page.getByTestId('car-mode-stage')).toContainText('Listening');
   });
 
   test('ending a car-mode session returns to the launch screen before mode can be changed', async ({
@@ -262,9 +298,14 @@ test.describe('rehearsal browser e2e', () => {
       .toBe(1);
 
     await page.getByTestId('button-start-rehearsal').click();
-    await expect(page.getByTestId('button-record')).toBeVisible();
-    await page.getByTestId('button-record').click();
-    await expect(page.getByTestId('button-stop-recording')).toBeVisible();
+    await expect(page.getByText('Use your car controls')).toBeVisible();
+    await page.evaluate(() => {
+      (
+        window as Window & {
+          __e2eMediaSessionHandlers?: Record<string, (() => void) | null>;
+        }
+      ).__e2eMediaSessionHandlers?.nexttrack?.();
+    });
 
     await expect
       .poll(

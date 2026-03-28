@@ -993,12 +993,12 @@ export default function RehearsalPage() {
       if (result.playbackReady && result.microphoneReady) {
         clearAudioRecovery();
         setHasCompletedDeviceSetup(true);
-        toast({
-          title: 'Device Ready',
-          description: carMode
-            ? 'Microphone, playback, and car-mode audio routing are prepared for rehearsal.'
-            : 'Microphone and playback are prepared for a smoother rehearsal start.',
-        });
+        if (!carMode) {
+          toast({
+            title: 'Device Ready',
+            description: 'Microphone and playback are prepared for a smoother rehearsal start.',
+          });
+        }
       } else {
         toast({
           variant: 'destructive',
