@@ -17,7 +17,7 @@ test.describe('rehearsal browser e2e', () => {
       selectedCharacter: null,
     });
 
-    await expect(page.getByText('E2E Rehearsal')).toBeVisible();
+    await expect(page.getByText('Set Up Before You Start')).toBeVisible();
     await completeDeviceSetup(page);
     await selectCharacter(page, 'BOB');
     await page.getByTestId('button-start-rehearsal').click();
@@ -35,6 +35,7 @@ test.describe('rehearsal browser e2e', () => {
       transcriptionText: 'My cue line.',
     });
 
+    await completeDeviceSetup(page);
     await page.getByTestId('button-start-rehearsal').click();
     await expect(page.getByTestId('line-1')).toContainText('Recall your line...');
 
@@ -58,6 +59,7 @@ test.describe('rehearsal browser e2e', () => {
       transcriptionText: 'My cue line.',
     });
 
+    await completeDeviceSetup(page);
     await page.getByTestId('button-start-rehearsal').click();
     await expect(page.getByTestId('line-1')).toContainText('Recall your line...');
 
@@ -80,6 +82,15 @@ test.describe('rehearsal browser e2e', () => {
       microphoneMode: 'controlled',
     });
 
+    await page.getByTestId('button-prepare-device').click();
+    await page.evaluate(() => {
+      (
+        window as Window & {
+          __e2eResolveControlledGetUserMedia?: () => void;
+        }
+      ).__e2eResolveControlledGetUserMedia?.();
+    });
+    await expect(page.getByText('Device check complete.')).toBeVisible();
     await page.getByTestId('button-start-rehearsal').click();
     await expect(page.getByTestId('line-1')).toContainText('Recall your line...');
 
@@ -99,7 +110,7 @@ test.describe('rehearsal browser e2e', () => {
             ).__e2eGetUserMediaCalls ?? 0,
         ),
       )
-      .toBe(1);
+      .toBe(2);
 
     await page.evaluate(() => {
       (
@@ -117,11 +128,11 @@ test.describe('rehearsal browser e2e', () => {
   }) => {
     await setupRehearsalApp(page, {
       carMode: true,
-      microphoneMode: 'pending',
       script: CAR_MODE_SCRIPT,
       selectedCharacter: 'BOB',
     });
 
+    await completeDeviceSetup(page);
     await page.getByTestId('button-start-rehearsal').click();
 
     await expect(page.getByText('Screen awake')).toBeVisible();
@@ -159,8 +170,8 @@ test.describe('rehearsal browser e2e', () => {
       ).__e2eMediaSessionHandlers?.nexttrack?.();
     });
 
-    await expect(page.getByTestId('line-1')).toContainText('Recall your line...');
-    await expect(page.getByTestId('line-1')).toHaveClass(/ring-2/);
+    await expect(page.getByTestId('car-mode-stage')).toContainText('Second solo cue.');
+    await expect(page.getByTestId('car-mode-stage')).toContainText('Line 2');
 
     await page.evaluate(() => {
       (
@@ -170,8 +181,8 @@ test.describe('rehearsal browser e2e', () => {
       ).__e2eMediaSessionHandlers?.previoustrack?.();
     });
 
-    await expect(page.getByTestId('line-0')).toHaveClass(/ring-2/);
-    await expect(page.getByTestId('line-0')).toContainText('Recall your line...');
+    await expect(page.getByTestId('car-mode-stage')).toContainText('First solo cue.');
+    await expect(page.getByTestId('car-mode-stage')).toContainText('Line 1');
   });
 
   test('car mode reuses the prepared microphone stream after device setup', async ({ page }) => {
@@ -221,6 +232,7 @@ test.describe('rehearsal browser e2e', () => {
       transcriptionText: 'Something incorrect.',
     });
 
+    await completeDeviceSetup(page);
     await page.getByTestId('button-start-rehearsal').click();
     await expect(page.getByTestId('line-1')).toContainText('Recall your line...');
 
@@ -261,6 +273,7 @@ test.describe('rehearsal mobile layout e2e', () => {
       transcriptionText: 'Something incorrect.',
     });
 
+    await completeDeviceSetup(page);
     await page.getByTestId('button-start-rehearsal').click();
     await page.getByTestId('button-record').click();
     await page.getByTestId('button-stop-recording').click({ force: true });

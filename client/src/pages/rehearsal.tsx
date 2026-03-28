@@ -3,6 +3,7 @@ import { useToast } from '@/hooks/use-toast';
 import { ApiKeyInput } from '@/components/api-key-input';
 import { CharacterSelector } from '@/components/character-selector';
 import { DeviceSetupScreen } from '@/components/device-setup-screen';
+import { CarModeStage } from '@/components/car-mode-stage';
 import { RehearsalTimeline } from '@/components/rehearsal-timeline';
 import { RehearsalControls } from '@/components/rehearsal-controls';
 import { ScriptHeader } from '@/components/script-header';
@@ -165,6 +166,7 @@ export default function RehearsalPage() {
   const onSilenceTimeoutRef = useRef<(() => void) | null>(null);
   const {
     prepareRecordingSession,
+    releasePreparedRecordingSession,
     startRecording,
     stopRecording,
     isRecording,
@@ -218,6 +220,7 @@ export default function RehearsalPage() {
   const hasScheduledInitialAudioPrefetchRef = useRef(false);
   const lastAppliedAudioSessionTypeRef = useRef<string | null>(null);
   const pendingAudioRecoveryRef = useRef<PendingAudioRecovery | null>(null);
+  const lastSelectedModeRef = useRef(carMode);
 
   useEffect(() => {
     rehearsalLinesRef.current = rehearsalLines;
@@ -279,7 +282,7 @@ export default function RehearsalPage() {
   const showSlowPreparationHint = isSlowPreparation(slowPreparationSeconds * 1000);
   const showPreparationRecoveryAction = shouldOfferPreparationRecovery(slowPreparationSeconds * 1000);
   const shouldKeepScreenAwake = carMode && hasStarted && !isComplete;
-  const shouldShowFirstSetupScreen = showSetup && !hasStarted && !hasCompletedDeviceSetup;
+  const shouldShowLaunchScreen = !hasStarted;
   const preferredAudioSessionType = resolvePreferredAudioSessionType({
     carMode,
     hasCompletedDeviceSetup,
@@ -430,6 +433,22 @@ export default function RehearsalPage() {
       } satisfies PracticePreferences),
     );
   }, [selectedCharacter, carMode, autoSpeakCorrections]);
+
+  useEffect(() => {
+    const previousCarMode = lastSelectedModeRef.current;
+    lastSelectedModeRef.current = carMode;
+
+    if (previousCarMode === carMode || hasStarted) {
+      return;
+    }
+
+    releasePreparedRecordingSession();
+    setHasCompletedDeviceSetup(false);
+    setMicrophoneSetupStatus('idle');
+    setMicrophoneSetupMessage(null);
+    setPlaybackSetupStatus('idle');
+    setPlaybackSetupMessage(null);
+  }, [carMode, hasStarted, releasePreparedRecordingSession]);
 
   useEffect(() => {
     async function loadScript() {
@@ -594,6 +613,8 @@ export default function RehearsalPage() {
   );
   const canGoPrevious = currentLineIndex > 0;
   const canGoNext = currentLineIndex >= 0 && rehearsalLines.length > 0;
+  const canStartRehearsal =
+    hasApiKey && Boolean(selectedCharacter) && hasCompletedDeviceSetup && !isPreparingDevice;
 
   const prefetchLineAudio = useCallback((lineIndex: number) => {
     if (!hasApiKey || lineIndex < 0) {
@@ -1124,6 +1145,21 @@ export default function RehearsalPage() {
 
     try {
       clearCarModeAutoStartTimeout();
+      const recordingAudioSessionResult = setPreferredAudioSessionType(
+        navigator,
+        'play-and-record',
+      );
+      if (
+        recordingAudioSessionResult.supported &&
+        lastAppliedAudioSessionTypeRef.current !== 'play-and-record'
+      ) {
+        lastAppliedAudioSessionTypeRef.current = 'play-and-record';
+        addDebugLog(
+          'Audio Session Configured',
+          `type=play-and-record${recordingAudioSessionResult.state ? ` | state=${recordingAudioSessionResult.state}` : ''}`,
+        );
+      }
+
       const didStartRecording = await startRecordingTransition({
         startRecording,
         primeAudioPlayback,
@@ -1538,6 +1574,9 @@ export default function RehearsalPage() {
       navigator.mediaSession.playbackState = 'none';
       setMediaSessionActionHandler('nexttrack', null);
       setMediaSessionActionHandler('previoustrack', null);
+      setMediaSessionActionHandler('play', null);
+      setMediaSessionActionHandler('pause', null);
+      setMediaSessionActionHandler('stop', null);
       return;
     }
 
@@ -1558,14 +1597,34 @@ export default function RehearsalPage() {
 
     setMediaSessionActionHandler('nexttrack', handleNext);
     setMediaSessionActionHandler('previoustrack', handlePrevious);
+    setMediaSessionActionHandler('play', () => {
+      if (rehearsalStateRef.current === 'waiting-for-user' && !isRecordingRef.current) {
+        void handleStartRecording();
+      }
+    });
+    setMediaSessionActionHandler('pause', () => {
+      if (isRecordingRef.current) {
+        void handleStopRecording();
+      }
+    });
+    setMediaSessionActionHandler('stop', () => {
+      if (isRecordingRef.current) {
+        void handleStopRecording();
+      }
+    });
 
     return () => {
       setMediaSessionActionHandler('nexttrack', null);
       setMediaSessionActionHandler('previoustrack', null);
+      setMediaSessionActionHandler('play', null);
+      setMediaSessionActionHandler('pause', null);
+      setMediaSessionActionHandler('stop', null);
     };
   }, [
     carMode,
     currentLine,
+    handleStartRecording,
+    handleStopRecording,
     handleNext,
     handlePrevious,
     hasStarted,
@@ -1623,30 +1682,39 @@ export default function RehearsalPage() {
       </header>
 
       <main className="flex-1 flex flex-col min-h-0 max-w-4xl mx-auto w-full">
-        {shouldShowFirstSetupScreen && (
+        {shouldShowLaunchScreen && (
           <DeviceSetupScreen
+            apiKeySection={<ApiKeyInput onKeyChange={setHasApiKey} />}
+            characterSection={
+              <CharacterSelector
+                characters={characters}
+                selectedCharacter={selectedCharacter}
+                onSelect={setSelectedCharacter}
+                disabled={false}
+              />
+            }
+            autoSpeakCorrections={autoSpeakCorrections}
+            canStart={canStartRehearsal}
+            carMode={carMode}
+            isDeviceReady={hasCompletedDeviceSetup}
             isPreparing={isPreparingDevice}
             microphoneStatus={microphoneSetupStatus}
             microphoneMessage={microphoneSetupMessage}
             playbackStatus={playbackSetupStatus}
             playbackMessage={playbackSetupMessage}
+            onAutoSpeakCorrectionsChange={setAutoSpeakCorrections}
+            onCarModeChange={setCarMode}
             onPrepare={() => {
               void handlePrepareDevice();
+            }}
+            onStart={() => {
+              void handleStart();
             }}
           />
         )}
 
-        {showSetup && !shouldShowFirstSetupScreen && (
+        {showSetup && hasStarted && (
           <div className="p-4 space-y-4">
-            {hasCompletedDeviceSetup && !hasStarted && (
-              <Alert>
-                <AlertCircle className="h-4 w-4" />
-                <AlertTitle>Device Ready</AlertTitle>
-                <AlertDescription>
-                  Microphone access and audio playback have already been prepared for this session.
-                </AlertDescription>
-              </Alert>
-            )}
             <div className="grid gap-4 md:grid-cols-3">
               <ApiKeyInput onKeyChange={setHasApiKey} />
               <CharacterSelector
@@ -1799,73 +1867,87 @@ export default function RehearsalPage() {
           </div>
         )}
 
-        <ScriptHeader
-          title={script.title}
-          author={script.author}
-          totalLines={script.lines.length}
-          completedLines={completedLines}
-          userCharacter={selectedCharacter}
-          carMode={carMode}
-          autoSpeakCorrections={autoSpeakCorrections}
-          wakeLockStatus={wakeLockStatus}
-          showWakeLockStatus={shouldKeepScreenAwake}
-        />
-
-        <RehearsalTimeline
-          lines={rehearsalLines}
-          currentLineIndex={currentLineIndex}
-        />
-
-        <div className="safe-area-bottom safe-area-x sticky bottom-0 border-t border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
-          <div className="p-4">
-            {audioRecoveryMessage && (
-              <Alert className="mb-4 border-primary/40 bg-primary/5">
-                <AlertCircle className="h-4 w-4" />
-                <AlertTitle>Safari Needs One More Tap</AlertTitle>
-                <AlertDescription className="space-y-3">
-                  <p>{audioRecoveryMessage}</p>
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      type="button"
-                      data-testid="button-reenable-audio"
-                      onClick={() => {
-                        void handleReenableAudio();
-                      }}
-                      disabled={isRecoveringAudio}
-                    >
-                      <RefreshCw className={isRecoveringAudio ? 'mr-2 h-4 w-4 animate-spin' : 'mr-2 h-4 w-4'} />
-                      {isRecoveringAudio ? 'Re-enabling…' : 'Re-enable Audio'}
-                    </Button>
-                  </div>
-                </AlertDescription>
-              </Alert>
-            )}
-            <RehearsalControls
-              state={rehearsalState}
-              onStartRecording={handleStartRecording}
-              onStopRecording={handleStopRecording}
-              onPrevious={handlePrevious}
-              onNext={handleNext}
-              onStart={handleStart}
-              onRestart={handleRestart}
-              onReplayExpectedLine={handleReplayExpectedLine}
-              onRetryLine={handleRetryLine}
-              onSkipLine={handleSkipLine}
-              onRecoverPreparation={handleRecoverPreparation}
-              hasStarted={hasStarted}
-              isComplete={isComplete}
+        {!shouldShowLaunchScreen && (
+          <>
+            <ScriptHeader
+              title={script.title}
+              author={script.author}
+              totalLines={script.lines.length}
+              completedLines={completedLines}
+              userCharacter={selectedCharacter}
               carMode={carMode}
-              canReplayExpectedLine={canReplayExpectedLine}
-              canRetryLine={canRetryLine}
-              canGoPrevious={canGoPrevious}
-              canGoNext={canGoNext}
-              disabled={!hasApiKey || !selectedCharacter}
-              showSlowPreparationHint={showSlowPreparationHint}
-              slowPreparationSeconds={slowPreparationSeconds}
-              showPreparationRecoveryAction={showPreparationRecoveryAction}
+              autoSpeakCorrections={autoSpeakCorrections}
+              wakeLockStatus={wakeLockStatus}
+              showWakeLockStatus={shouldKeepScreenAwake}
             />
-          </div>
-        </div>
+
+            {carMode ? (
+              <CarModeStage
+                autoSpeakCorrections={autoSpeakCorrections}
+                canGoNext={canGoNext}
+                canGoPrevious={canGoPrevious}
+                currentLine={currentLine}
+                rehearsalState={rehearsalState}
+              />
+            ) : (
+              <RehearsalTimeline
+                lines={rehearsalLines}
+                currentLineIndex={currentLineIndex}
+              />
+            )}
+
+            <div className="safe-area-bottom safe-area-x sticky bottom-0 border-t border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+              <div className="p-4">
+                {audioRecoveryMessage && (
+                  <Alert className="mb-4 border-primary/40 bg-primary/5">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertTitle>Safari Needs One More Tap</AlertTitle>
+                    <AlertDescription className="space-y-3">
+                      <p>{audioRecoveryMessage}</p>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          data-testid="button-reenable-audio"
+                          onClick={() => {
+                            void handleReenableAudio();
+                          }}
+                          disabled={isRecoveringAudio}
+                        >
+                          <RefreshCw className={isRecoveringAudio ? 'mr-2 h-4 w-4 animate-spin' : 'mr-2 h-4 w-4'} />
+                          {isRecoveringAudio ? 'Re-enabling…' : 'Re-enable Audio'}
+                        </Button>
+                      </div>
+                    </AlertDescription>
+                  </Alert>
+                )}
+                <RehearsalControls
+                  state={rehearsalState}
+                  onStartRecording={handleStartRecording}
+                  onStopRecording={handleStopRecording}
+                  onPrevious={handlePrevious}
+                  onNext={handleNext}
+                  onStart={handleStart}
+                  onRestart={handleRestart}
+                  onReplayExpectedLine={handleReplayExpectedLine}
+                  onRetryLine={handleRetryLine}
+                  onSkipLine={handleSkipLine}
+                  onRecoverPreparation={handleRecoverPreparation}
+                  hasStarted={hasStarted}
+                  isComplete={isComplete}
+                  carMode={carMode}
+                  canReplayExpectedLine={canReplayExpectedLine}
+                  canRetryLine={canRetryLine}
+                  canGoPrevious={canGoPrevious}
+                  canGoNext={canGoNext}
+                  disabled={!hasApiKey || !selectedCharacter}
+                  showSlowPreparationHint={showSlowPreparationHint}
+                  slowPreparationSeconds={slowPreparationSeconds}
+                  showPreparationRecoveryAction={showPreparationRecoveryAction}
+                />
+              </div>
+            </div>
+          </>
+        )}
       </main>
     </div>
   );

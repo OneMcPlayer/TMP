@@ -37,7 +37,15 @@ export function resolvePreferredAudioSessionType({
     return 'auto';
   }
 
-  return carMode || isRecording ? 'play-and-record' : 'playback';
+  if (carMode || isRecording) {
+    return 'play-and-record';
+  }
+
+  if (isPreparingDevice || (hasCompletedDeviceSetup && !hasStarted)) {
+    return 'playback';
+  }
+
+  return 'auto';
 }
 
 export function setPreferredAudioSessionType(

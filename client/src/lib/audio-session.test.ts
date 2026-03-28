@@ -22,7 +22,7 @@ test('resolvePreferredAudioSessionType stays auto until rehearsal audio is armed
   );
 });
 
-test('resolvePreferredAudioSessionType prefers playback when the session is active without car mode', () => {
+test('resolvePreferredAudioSessionType prefers playback during setup before rehearsal starts', () => {
   assert.equal(
     resolvePreferredAudioSessionType({
       carMode: false,
@@ -32,6 +32,19 @@ test('resolvePreferredAudioSessionType prefers playback when the session is acti
       isRecording: false,
     }),
     'playback',
+  );
+});
+
+test('resolvePreferredAudioSessionType returns auto during a normal rehearsal so recording can arm later', () => {
+  assert.equal(
+    resolvePreferredAudioSessionType({
+      carMode: false,
+      hasCompletedDeviceSetup: true,
+      hasStarted: true,
+      isPreparingDevice: false,
+      isRecording: false,
+    }),
+    'auto',
   );
 });
 

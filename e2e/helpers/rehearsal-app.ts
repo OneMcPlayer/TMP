@@ -397,7 +397,7 @@ export async function completeDeviceSetup(page: Page): Promise<void> {
   const prepareButton = page.getByTestId('button-prepare-device');
   await expect(prepareButton).toBeVisible();
   await prepareButton.click();
-  await expect(prepareButton).toBeHidden();
+  await expect(page.getByText('Device check complete.')).toBeVisible();
 }
 
 export async function selectCharacter(page: Page, character: string): Promise<void> {
