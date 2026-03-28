@@ -3,7 +3,6 @@ import type { RehearsalState } from '@/lib/types';
 import {
   ArrowLeft,
   ArrowRight,
-  CarFront,
   Loader2,
   Mic,
   MicVocal,
@@ -64,10 +63,10 @@ export function RehearsalControls({
   showPreparationRecoveryAction = false,
 }: RehearsalControlsProps) {
   const actionButtonClass = carMode
-    ? 'h-24 w-full rounded-3xl text-xl font-semibold shadow-lg'
+    ? 'h-16 w-full rounded-3xl text-lg font-semibold shadow-lg'
     : 'gap-2';
   const navigationButtonClass = carMode
-    ? 'h-20 w-full rounded-3xl text-lg font-semibold'
+    ? 'h-14 w-full rounded-3xl text-base font-semibold'
     : 'gap-2';
   const compactActionButtonClass = carMode ? actionButtonClass : 'gap-2 w-full sm:w-auto';
   const compactNavigationButtonClass = carMode
@@ -122,16 +121,9 @@ export function RehearsalControls({
     <div
       className={cn(
         'p-4 bg-card rounded-lg',
-        carMode ? 'space-y-4' : 'flex items-center justify-center gap-4',
+        carMode ? 'space-y-3' : 'flex items-center justify-center gap-4',
       )}
     >
-      {carMode && (
-        <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
-          <CarFront className="w-4 h-4" />
-          <span>Car mode uses larger controls, stronger microphone cleanup, and track-button line navigation when supported.</span>
-        </div>
-      )}
-
       {state === 'waiting-for-user' && (
         <div className={actionGroupClass}>
           <Button
@@ -140,7 +132,7 @@ export function RehearsalControls({
             size="lg"
             className={compactActionButtonClass}
           >
-            {carMode ? <MicVocal className="w-8 h-8" /> : <Mic className="w-5 h-5" />}
+            {carMode ? <MicVocal className="w-6 h-6" /> : <Mic className="w-5 h-5" />}
             {carMode ? 'Tap To Speak' : 'Record Your Line'}
           </Button>
 
@@ -187,14 +179,14 @@ export function RehearsalControls({
       )}
 
       {state === 'recording' && (
-        <Button
-          data-testid="button-stop-recording"
-          onClick={onStopRecording}
-          size="lg"
-          variant="destructive"
-          className={cn(actionButtonClass, 'animate-pulse-recording')}
-        >
-          <Square className={cn(carMode ? 'w-8 h-8' : 'w-5 h-5')} />
+          <Button
+            data-testid="button-stop-recording"
+            onClick={onStopRecording}
+            size="lg"
+            variant="destructive"
+            className={cn(actionButtonClass, 'animate-pulse-recording')}
+          >
+          <Square className={cn(carMode ? 'w-6 h-6' : 'w-5 h-5')} />
           Stop Recording
         </Button>
       )}

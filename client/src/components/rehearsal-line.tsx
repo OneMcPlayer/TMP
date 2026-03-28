@@ -32,12 +32,12 @@ function ScriptText({ text }: { text: string }) {
 
 function DiffDisplay({ diff }: { diff: WordDiff[] }) {
   return (
-    <div className="flex flex-wrap gap-1 mt-2">
+    <div className="mt-2 flex max-w-full flex-wrap gap-1 overflow-hidden">
       {diff.map((item, index) => (
         <span
           key={index}
           className={cn(
-            'max-w-full break-words px-1 py-0.5 rounded text-sm font-medium',
+            'max-w-full rounded px-1 py-0.5 text-sm font-medium [overflow-wrap:anywhere]',
             item.status === 'correct' && 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
             item.status === 'missing' && 'bg-red-100 text-red-800 line-through dark:bg-red-900/30 dark:text-red-300',
             item.status === 'extra' && 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300',
@@ -59,7 +59,7 @@ export function RehearsalLineComponent({ line, isCurrentLine }: RehearsalLinePro
     <div
       data-testid={`line-${line.index}`}
       className={cn(
-        'p-4 rounded-lg transition-all duration-300 animate-fade-in-up',
+        'max-w-full overflow-hidden p-4 rounded-lg transition-all duration-300 animate-fade-in-up',
         isCurrentLine && 'ring-2 ring-primary ring-offset-2 ring-offset-background',
         line.state === 'pending' && 'opacity-40',
         line.state === 'active' && 'bg-card',
@@ -77,30 +77,29 @@ export function RehearsalLineComponent({ line, isCurrentLine }: RehearsalLinePro
         </div>
         
         <div className="flex-1 min-w-0">
-          {/* Keep the original compact badge row until we do a broader mobile overflow pass. */}
-          <div className="flex items-center gap-2 mb-1">
+          <div className="mb-2 flex flex-wrap items-start gap-2">
             <span className={cn(
-              'font-semibold text-sm',
+              'shrink-0 font-semibold text-sm',
               line.isUserLine ? 'text-primary' : 'text-muted-foreground'
             )}>
               {line.character}
             </span>
             
             {line.isUserLine && (
-              <Badge variant="outline" className="text-xs">
+              <Badge variant="outline" className="max-w-full whitespace-normal break-words text-xs">
                 You
               </Badge>
             )}
             
             {line.state === 'active' && line.isUserLine && (
-              <Badge className="text-xs bg-primary/10 text-primary border-primary/20">
+              <Badge className="max-w-full whitespace-normal break-words text-xs bg-primary/10 text-primary border-primary/20">
                 <Mic className="w-3 h-3 mr-1" />
                 Your turn
               </Badge>
             )}
             
             {line.state === 'active' && !line.isUserLine && (
-              <Badge className="text-xs bg-accent/20 text-accent-foreground border-accent/30">
+              <Badge className="max-w-full whitespace-normal break-words text-xs bg-accent/20 text-accent-foreground border-accent/30">
                 <Clock className="w-3 h-3 mr-1" />
                 Speaking...
               </Badge>
@@ -109,7 +108,7 @@ export function RehearsalLineComponent({ line, isCurrentLine }: RehearsalLinePro
             {line.state === 'completed' && line.accuracy !== undefined && (
               <Badge 
                 className={cn(
-                  'text-xs',
+                  'max-w-full whitespace-normal break-words text-xs',
                   line.accuracy >= 80 && 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300',
                   line.accuracy >= 50 && line.accuracy < 80 && 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300',
                   line.accuracy < 50 && 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
@@ -121,7 +120,7 @@ export function RehearsalLineComponent({ line, isCurrentLine }: RehearsalLinePro
             )}
 
             {line.correctionPlayed && (
-              <Badge variant="outline" className="text-xs">
+              <Badge variant="outline" className="max-w-full whitespace-normal break-words text-xs">
                 <Volume2 className="w-3 h-3 mr-1" />
                 Correction spoken
               </Badge>
@@ -135,16 +134,16 @@ export function RehearsalLineComponent({ line, isCurrentLine }: RehearsalLinePro
           ) : (
             <>
               <p className={cn(
-                'text-base leading-relaxed break-words',
+                'max-w-full text-base leading-relaxed [overflow-wrap:anywhere]',
                 line.state === 'completed' && line.isUserLine && 'font-medium'
               )}>
                 <ScriptText text={line.text} />
               </p>
               
               {showResults && (
-                <div className="mt-3 pt-3 border-t border-border/50">
+                <div className="mt-3 max-w-full overflow-hidden border-t border-border/50 pt-3">
                   <p className="text-xs text-muted-foreground mb-1">Transcribed</p>
-                  <p className="text-sm leading-relaxed break-words">{line.spokenText}</p>
+                  <p className="max-w-full text-sm leading-relaxed [overflow-wrap:anywhere]">{line.spokenText}</p>
 
                   {hasErrors && line.diff && (
                     <>

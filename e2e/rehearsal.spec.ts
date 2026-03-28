@@ -134,8 +134,9 @@ test.describe('rehearsal browser e2e', () => {
 
     await completeDeviceSetup(page);
     await page.getByTestId('button-start-rehearsal').click();
-
-    await expect(page.getByText('Screen awake')).toBeVisible();
+    await expect(page.getByTestId('button-toggle-setup')).toBeHidden();
+    await expect(page.getByTestId('button-end-session')).toBeVisible();
+    await expect(page.getByTestId('car-mode-stage')).toBeVisible();
     await expect
       .poll(() =>
         page.evaluate(() =>
@@ -183,6 +184,23 @@ test.describe('rehearsal browser e2e', () => {
 
     await expect(page.getByTestId('car-mode-stage')).toContainText('First solo cue.');
     await expect(page.getByTestId('car-mode-stage')).toContainText('Line 1');
+  });
+
+  test('ending a car-mode session returns to the launch screen before mode can be changed', async ({
+    page,
+  }) => {
+    await setupRehearsalApp(page, {
+      carMode: true,
+      script: CAR_MODE_SCRIPT,
+      selectedCharacter: 'BOB',
+    });
+
+    await completeDeviceSetup(page);
+    await page.getByTestId('button-start-rehearsal').click();
+    await page.getByTestId('button-end-session').click();
+
+    await expect(page.getByText('Set Up Before You Start')).toBeVisible();
+    await expect(page.getByTestId('button-mode-car')).toBeVisible();
   });
 
   test('car mode reuses the prepared microphone stream after device setup', async ({ page }) => {
@@ -289,5 +307,26 @@ test.describe('rehearsal mobile layout e2e', () => {
 
     expect(viewportWidths.bodyScrollWidth).toBeLessThanOrEqual(viewportWidths.innerWidth + 1);
     expect(viewportWidths.documentScrollWidth).toBeLessThanOrEqual(viewportWidths.innerWidth + 1);
+  });
+
+  test('keeps the active car-mode session on a fixed mobile viewport without page scroll', async ({ page }) => {
+    await setupRehearsalApp(page, {
+      carMode: true,
+      script: CAR_MODE_SCRIPT,
+      selectedCharacter: 'BOB',
+    });
+
+    await completeDeviceSetup(page);
+    await page.getByTestId('button-start-rehearsal').click();
+    await expect(page.getByTestId('car-mode-stage')).toBeVisible();
+
+    const viewportHeights = await page.evaluate(() => ({
+      bodyScrollHeight: document.body.scrollHeight,
+      documentScrollHeight: document.documentElement.scrollHeight,
+      innerHeight: window.innerHeight,
+    }));
+
+    expect(viewportHeights.bodyScrollHeight).toBeLessThanOrEqual(viewportHeights.innerHeight + 1);
+    expect(viewportHeights.documentScrollHeight).toBeLessThanOrEqual(viewportHeights.innerHeight + 1);
   });
 });

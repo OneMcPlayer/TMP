@@ -53,6 +53,7 @@ import {
 import { APP_VERSION, buildUpdateReloadUrl, fetchLatestVersion, isUpdateAvailable } from '@/lib/version';
 import { isSlowPreparation, shouldOfferPreparationRecovery } from '@/lib/rehearsal-latency';
 import { prepareDeviceForRehearsal } from '@/lib/device-setup';
+import { cn } from '@/lib/utils';
 import { AlertCircle, CarFront, Copy, Download, RefreshCw, Settings, Smartphone, Theater } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -449,6 +450,12 @@ export default function RehearsalPage() {
     setPlaybackSetupStatus('idle');
     setPlaybackSetupMessage(null);
   }, [carMode, hasStarted, releasePreparedRecordingSession]);
+
+  useEffect(() => {
+    if (carMode && hasStarted && showSetup) {
+      setShowSetup(false);
+    }
+  }, [carMode, hasStarted, showSetup]);
 
   useEffect(() => {
     async function loadScript() {
@@ -1509,8 +1516,12 @@ export default function RehearsalPage() {
   }, [addDebugLog, processLine]);
 
   const handleToggleSetup = useCallback(() => {
+    if (carMode) {
+      return;
+    }
+
     setShowSetup(prev => !prev);
-  }, []);
+  }, [carMode]);
 
   const handleCopyDebugLogs = useCallback(async () => {
     try {
@@ -1658,15 +1669,23 @@ export default function RehearsalPage() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col overflow-x-hidden">
-      <header className="safe-area-top safe-area-x border-b border-border bg-background/95 backdrop-blur sticky top-0 z-50 supports-[backdrop-filter]:bg-background/80">
+    <div
+      className={cn(
+        'flex flex-col overflow-x-hidden',
+        carMode && hasStarted ? 'h-[100dvh] max-h-[100dvh] overflow-hidden' : 'min-h-screen',
+      )}
+    >
+      <header className={cn(
+        'safe-area-top safe-area-x border-b border-border bg-background/95 backdrop-blur z-50 supports-[backdrop-filter]:bg-background/80',
+        carMode && hasStarted ? 'shrink-0' : 'sticky top-0',
+      )}>
         <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between gap-4">
           <div className="flex items-center gap-2">
             <Theater className="w-6 h-6 text-primary" />
             <span className="font-serif font-semibold text-lg">Rehearsal Partner</span>
           </div>
           <div className="flex items-center gap-2">
-            {hasStarted && (
+            {hasStarted && !carMode && (
               <Button
                 data-testid="button-toggle-setup"
                 size="icon"
@@ -1676,12 +1695,28 @@ export default function RehearsalPage() {
                 <Settings className="w-5 h-5" />
               </Button>
             )}
+            {hasStarted && carMode && (
+              <Button
+                data-testid="button-end-session"
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={handleRestart}
+              >
+                End Session
+              </Button>
+            )}
             <ThemeToggle />
           </div>
         </div>
       </header>
 
-      <main className="flex-1 flex flex-col min-h-0 max-w-4xl mx-auto w-full">
+      <main
+        className={cn(
+          'flex-1 flex flex-col min-h-0 max-w-4xl mx-auto w-full',
+          carMode && hasStarted && 'overflow-hidden',
+        )}
+      >
         {shouldShowLaunchScreen && (
           <DeviceSetupScreen
             apiKeySection={<ApiKeyInput onKeyChange={setHasApiKey} />}
@@ -1713,7 +1748,7 @@ export default function RehearsalPage() {
           />
         )}
 
-        {showSetup && hasStarted && (
+        {showSetup && hasStarted && !carMode && (
           <div className="p-4 space-y-4">
             <div className="grid gap-4 md:grid-cols-3">
               <ApiKeyInput onKeyChange={setHasApiKey} />
@@ -1745,8 +1780,14 @@ export default function RehearsalPage() {
                       id="car-mode"
                       checked={carMode}
                       onCheckedChange={setCarMode}
+                      disabled={hasStarted}
                     />
                   </div>
+                  {hasStarted && (
+                    <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 text-sm text-amber-700 dark:text-amber-300">
+                      Close the current session to switch between normal mode and car mode.
+                    </div>
+                  )}
 
                   <div className="flex items-start justify-between gap-3">
                     <div className="space-y-1">
@@ -1869,25 +1910,31 @@ export default function RehearsalPage() {
 
         {!shouldShowLaunchScreen && (
           <>
-            <ScriptHeader
-              title={script.title}
-              author={script.author}
-              totalLines={script.lines.length}
-              completedLines={completedLines}
-              userCharacter={selectedCharacter}
-              carMode={carMode}
-              autoSpeakCorrections={autoSpeakCorrections}
-              wakeLockStatus={wakeLockStatus}
-              showWakeLockStatus={shouldKeepScreenAwake}
-            />
+            {!carMode && (
+              <ScriptHeader
+                title={script.title}
+                author={script.author}
+                totalLines={script.lines.length}
+                completedLines={completedLines}
+                userCharacter={selectedCharacter}
+                carMode={carMode}
+                autoSpeakCorrections={autoSpeakCorrections}
+                wakeLockStatus={wakeLockStatus}
+                showWakeLockStatus={shouldKeepScreenAwake}
+              />
+            )}
 
             {carMode ? (
               <CarModeStage
                 autoSpeakCorrections={autoSpeakCorrections}
                 canGoNext={canGoNext}
                 canGoPrevious={canGoPrevious}
+                completedLines={completedLines}
                 currentLine={currentLine}
                 rehearsalState={rehearsalState}
+                scriptTitle={script.title}
+                totalLines={script.lines.length}
+                userCharacter={selectedCharacter}
               />
             ) : (
               <RehearsalTimeline
@@ -1896,7 +1943,12 @@ export default function RehearsalPage() {
               />
             )}
 
-            <div className="safe-area-bottom safe-area-x sticky bottom-0 border-t border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+            <div
+              className={cn(
+                'safe-area-bottom safe-area-x border-t border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80',
+                carMode ? 'shrink-0' : 'sticky bottom-0',
+              )}
+            >
               <div className="p-4">
                 {audioRecoveryMessage && (
                   <Alert className="mb-4 border-primary/40 bg-primary/5">
