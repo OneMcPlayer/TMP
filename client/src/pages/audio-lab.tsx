@@ -1375,18 +1375,18 @@ export default function AudioLabPage() {
   return (
     <div data-testid="audio-lab-page" className="flex min-h-screen flex-col overflow-hidden bg-background">
       <header className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/85">
-        <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
+        <div className="mx-auto flex max-w-5xl items-start justify-between gap-4 px-4 py-4 sm:items-center sm:px-6 lg:px-8">
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.25em] text-muted-foreground">
               <TestTube2 className="h-4 w-4 text-primary" />
               Audio Lab
             </div>
-            <h1 className="text-lg font-semibold tracking-tight sm:text-xl">
+            <h1 className="mt-1 text-lg font-semibold tracking-tight sm:text-xl">
               iPhone PWA Audio Test Wizard
             </h1>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             <Button asChild variant="outline" size="sm">
               <a href={buildAppRouteHref('rehearsal')}>
                 <ArrowLeft className="h-4 w-4" />
@@ -1399,17 +1399,22 @@ export default function AudioLabPage() {
       </header>
 
       <main className="mx-auto flex min-h-0 flex-1 max-w-5xl flex-col px-4 py-4 sm:px-6 lg:px-8">
-        <div className="mb-4 flex items-center justify-between gap-4">
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-[0.25em] text-muted-foreground">
               Step {currentStepIndex + 1} of {AUDIO_LAB_WIZARD_STEPS.length}
             </p>
-            <h2 data-testid="audio-lab-step-title" className="mt-1 text-2xl font-semibold tracking-tight">
+            <h2
+              data-testid="audio-lab-step-title"
+              className="mt-1 text-xl font-semibold tracking-tight sm:text-2xl"
+            >
               {currentStep.title}
             </h2>
             <p className="mt-1 max-w-3xl text-sm text-muted-foreground">{currentStep.description}</p>
           </div>
-          <Badge variant={getStepBadgeVariant(currentStepResult.status)}>{currentStepResult.status}</Badge>
+          <Badge className="w-fit" variant={getStepBadgeVariant(currentStepResult.status)}>
+            {currentStepResult.status}
+          </Badge>
         </div>
 
         <div className="mb-4 overflow-x-auto">
@@ -1455,29 +1460,33 @@ export default function AudioLabPage() {
           <CardContent className="flex min-h-0 flex-1 flex-col gap-5 p-5">
             <div className="min-h-0 flex-1 overflow-auto pr-1">{renderCurrentStepContent()}</div>
 
-            <div className="flex items-center justify-between gap-3 border-t pt-4">
-              <Button
-                data-testid="button-audio-lab-previous-step"
-                variant="outline"
-                onClick={() => goToStep(currentStepIndex - 1)}
-                disabled={isFirstStep}
-              >
-                <ChevronLeft className="h-4 w-4" />
-                Previous
-              </Button>
+            <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex w-full items-center justify-between gap-3 sm:w-auto">
+                <Button
+                  data-testid="button-audio-lab-previous-step"
+                  className="flex-1 sm:flex-none"
+                  variant="outline"
+                  onClick={() => goToStep(currentStepIndex - 1)}
+                  disabled={isFirstStep}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                  Previous
+                </Button>
 
-              <p className="text-center text-xs text-muted-foreground">
+                <Button
+                  data-testid="button-audio-lab-next-step"
+                  className="flex-1 sm:flex-none"
+                  onClick={() => goToStep(currentStepIndex + 1)}
+                  disabled={isLastStep}
+                >
+                  Next
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+
+              <p className="text-center text-xs text-muted-foreground sm:max-w-xs sm:text-right">
                 This wizard is meant to answer the current open questions one phase at a time.
               </p>
-
-              <Button
-                data-testid="button-audio-lab-next-step"
-                onClick={() => goToStep(currentStepIndex + 1)}
-                disabled={isLastStep}
-              >
-                Next
-                <ChevronRight className="h-4 w-4" />
-              </Button>
             </div>
           </CardContent>
         </Card>
