@@ -1373,7 +1373,10 @@ export default function AudioLabPage() {
   };
 
   return (
-    <div data-testid="audio-lab-page" className="flex min-h-screen flex-col overflow-hidden bg-background">
+    <div
+      data-testid="audio-lab-page"
+      className="flex h-[100dvh] min-h-screen max-h-[100dvh] flex-col overflow-hidden bg-background"
+    >
       <header className="safe-area-top safe-area-x border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/85">
         <div className="mx-auto flex max-w-5xl items-start justify-between gap-4 px-4 py-3 sm:items-center sm:px-6 sm:py-4 lg:px-8">
           <div className="min-w-0">
@@ -1398,7 +1401,7 @@ export default function AudioLabPage() {
         </div>
       </header>
 
-      <main className="safe-area-x safe-area-bottom mx-auto flex min-h-0 flex-1 max-w-5xl flex-col px-4 py-4 sm:px-6 lg:px-8">
+      <main className="safe-area-x safe-area-bottom mx-auto flex min-h-0 flex-1 max-w-5xl flex-col overflow-hidden px-4 py-4 sm:px-6 lg:px-8">
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-[0.25em] text-muted-foreground">
@@ -1417,7 +1420,13 @@ export default function AudioLabPage() {
           </Badge>
         </div>
 
-        <div className="mb-4 overflow-x-auto">
+        <div className="mb-4 sm:hidden">
+          <div className="rounded-2xl border border-border/60 bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+            Use the buttons at the bottom to move step by step.
+          </div>
+        </div>
+
+        <div className="mb-4 hidden overflow-x-auto sm:block">
           <div className="flex min-w-max gap-2 pb-1">
             {AUDIO_LAB_WIZARD_STEPS.map((step, index) => (
               <Button

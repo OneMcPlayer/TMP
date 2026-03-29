@@ -18,6 +18,7 @@
 - A later March 29, 2026 `1.0.32` run still showed that Audio Lab could eventually receive next/back events while the main rehearsal car mode did not, so the lab remains the more trustworthy source of capability evidence.
 - That same `1.0.32` run also showed that the short playback cue can time out even after silent playback priming succeeds, which means cue reliability is another variable worth tracking explicitly.
 - Real-device recordings are better than they were earlier in the week, but blob sizes in the low-kilobyte range can still land in a gray area where the capture technically succeeded but may not represent a genuinely useful spoken take.
+- A later March 29, 2026 visual check showed that the standalone iPhone shell can still make the Audio Lab header feel cramped even when browser-based mobile tests pass, so phone-specific safe-area and shell chrome need to be treated as a separate concern from ordinary responsive layout.
 
 ## Working assumptions
 
