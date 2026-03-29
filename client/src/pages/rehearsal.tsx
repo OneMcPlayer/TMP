@@ -54,6 +54,8 @@ import {
 import { APP_VERSION, buildUpdateReloadUrl, fetchLatestVersion, isUpdateAvailable } from '@/lib/version';
 import { isSlowPreparation, shouldOfferPreparationRecovery } from '@/lib/rehearsal-latency';
 import { prepareDeviceForRehearsal } from '@/lib/device-setup';
+import { shouldIgnoreDuplicateMediaControlAction } from '@/lib/media-control-guard';
+import { isSuspiciouslySmallRecordingBlob } from '@/lib/recording-quality';
 import { cn } from '@/lib/utils';
 import { buildAppRouteHref } from '@/lib/app-route';
 import { AlertCircle, CarFront, Copy, Download, RefreshCw, Settings, Smartphone, Theater } from 'lucide-react';
@@ -68,6 +70,7 @@ const PREFERENCES_STORAGE_KEY = 'rehearsal_preferences';
 const TRACK_NAVIGATION_STATES: RehearsalState[] = ['waiting-for-user', 'showing-feedback'];
 const INITIAL_AUDIO_PREFETCH_COUNT = 5;
 const LOOKAHEAD_AUDIO_PREFETCH_COUNT = 3;
+const CAR_MODE_MEDIA_CONTROL_DEBOUNCE_MS = 900;
 
 const VOICE_MAP: Record<string, string> = {
   'CLOV': 'fable',
@@ -223,6 +226,15 @@ export default function RehearsalPage() {
   const pendingAudioRecoveryRef = useRef<PendingAudioRecovery | null>(null);
   const lastSelectedModeRef = useRef(carMode);
   const discardActiveRecordingRef = useRef(false);
+  const lastCarModeMediaControlRef = useRef<{
+    action: 'nexttrack' | 'previoustrack' | null;
+    scope: string | null;
+    timestamp: number;
+  }>({
+    action: null,
+    scope: null,
+    timestamp: 0,
+  });
 
   useEffect(() => {
     rehearsalLinesRef.current = rehearsalLines;
@@ -911,6 +923,8 @@ export default function RehearsalPage() {
 
     isStartingRef.current = true;
     try {
+      lastCarModeMediaControlRef.current = { action: null, scope: null, timestamp: 0 };
+
       if (needsRehearsalLineInitialization(rehearsalLinesRef.current, script, selectedCharacter)) {
         const initializedLines = buildRehearsalLines(script, selectedCharacter);
         rehearsalLinesRef.current = initializedLines;
@@ -1234,6 +1248,21 @@ export default function RehearsalPage() {
         return;
       }
 
+      if (isSuspiciouslySmallRecordingBlob(audioBlob.size)) {
+        addDebugLog(
+          'Recording Warm-Up Required',
+          `Tiny recording ignored | size=${audioBlob.size} | type=${audioBlob.type || 'unknown'}`,
+        );
+        toast({
+          title: 'Recording Needs One More Try',
+          description: carMode
+            ? 'Safari returned a tiny warm-up recording. Use your car control again to retry the line.'
+            : 'Safari returned a tiny warm-up recording. Please record the line one more time.',
+        });
+        updateRehearsalState('waiting-for-user');
+        return;
+      }
+
       void primeAudioPlayback().catch((error) => {
         addDebugLog(
           'Audio Priming Error',
@@ -1457,6 +1486,7 @@ export default function RehearsalPage() {
     clearAudioRecovery();
     clearCorrectionAudioCache();
     clearPrefetchedAudioIndexes();
+    lastCarModeMediaControlRef.current = { action: null, scope: null, timestamp: 0 };
     setShowSetup(false);
 
     if (isRecordingRef.current || isStoppingRecordingRef.current) {
@@ -1518,7 +1548,45 @@ export default function RehearsalPage() {
     setShowSetup(prev => !prev);
   }, [carMode, hasStarted]);
 
+  const shouldIgnoreCarModeMediaControl = useCallback(
+    (action: 'nexttrack' | 'previoustrack') => {
+      const now = Date.now();
+      const lastActionState = lastCarModeMediaControlRef.current;
+      const nextScope = `${currentLineIndexRef.current}:${rehearsalStateRef.current}`;
+
+      if (
+        shouldIgnoreDuplicateMediaControlAction({
+          debounceMs: CAR_MODE_MEDIA_CONTROL_DEBOUNCE_MS,
+          lastAction: lastActionState.action,
+          lastScope: lastActionState.scope,
+          lastTimestamp: lastActionState.timestamp,
+          nextAction: action,
+          nextScope,
+          now,
+        })
+      ) {
+        addDebugLog(
+          'Car Control Ignored',
+          `action=${action} | debounce=${CAR_MODE_MEDIA_CONTROL_DEBOUNCE_MS}ms`,
+        );
+        return true;
+      }
+
+      lastCarModeMediaControlRef.current = {
+        action,
+        scope: nextScope,
+        timestamp: now,
+      };
+      return false;
+    },
+    [addDebugLog],
+  );
+
   const handleCarModePlayOrNext = useCallback(() => {
+    if (shouldIgnoreCarModeMediaControl('nexttrack')) {
+      return;
+    }
+
     const activeLine = rehearsalLinesRef.current[currentLineIndexRef.current];
 
     if (
@@ -1531,7 +1599,15 @@ export default function RehearsalPage() {
     }
 
     handleNext();
-  }, [handleNext, handleStartRecording]);
+  }, [handleNext, handleStartRecording, shouldIgnoreCarModeMediaControl]);
+
+  const handleCarModePrevious = useCallback(() => {
+    if (shouldIgnoreCarModeMediaControl('previoustrack')) {
+      return;
+    }
+
+    handlePrevious();
+  }, [handlePrevious, shouldIgnoreCarModeMediaControl]);
 
   const handleCopyDebugLogs = useCallback(async () => {
     try {
@@ -1617,7 +1693,7 @@ export default function RehearsalPage() {
         : 'paused';
 
     setMediaSessionActionHandler('nexttrack', handleCarModePlayOrNext);
-    setMediaSessionActionHandler('previoustrack', handlePrevious);
+    setMediaSessionActionHandler('previoustrack', handleCarModePrevious);
     setMediaSessionActionHandler('play', () => {
       if (rehearsalStateRef.current === 'waiting-for-user' && !isRecordingRef.current) {
         void handleStartRecording();
@@ -1647,7 +1723,7 @@ export default function RehearsalPage() {
     handleCarModePlayOrNext,
     handleStartRecording,
     handleStopRecording,
-    handlePrevious,
+    handleCarModePrevious,
     hasStarted,
     isComplete,
     rehearsalState,

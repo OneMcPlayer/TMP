@@ -87,6 +87,40 @@ test.describe('rehearsal browser e2e', () => {
     await expect(page.getByTestId('button-next')).toBeVisible();
   });
 
+  test('retries after a tiny warm-up recording blob and succeeds on the second take', async ({
+    page,
+  }) => {
+    await setupRehearsalApp(page, {
+      mediaRecorderBlobSizes: [5],
+      script: PARTNER_LEAD_SCRIPT,
+      selectedCharacter: 'BOB',
+      transcriptionText: 'My cue line.',
+    });
+
+    await completeDeviceSetup(page);
+    await page.getByTestId('button-start-rehearsal').click();
+    await expect(page.getByTestId('line-1')).toContainText('Recall your line...');
+
+    await page.getByTestId('button-record').click();
+    await expect(page.getByTestId('button-stop-recording')).toBeVisible();
+    await page.getByTestId('button-stop-recording').click({ force: true });
+
+    await expect(
+      page.getByText(
+        'Safari returned a tiny warm-up recording. Please record the line one more time.',
+      ),
+    ).toBeVisible();
+    await expect(page.getByTestId('line-1')).not.toContainText('100%');
+    await expect(page.getByTestId('button-record')).toBeVisible();
+
+    await page.getByTestId('button-record').click();
+    await expect(page.getByTestId('button-stop-recording')).toBeVisible();
+    await page.getByTestId('button-stop-recording').click({ force: true });
+
+    await expect(page.getByTestId('line-1')).toContainText('100%');
+    await expect(page.getByTestId('line-1')).toContainText('My cue line.');
+  });
+
   test('still scores a line when the recorder has already gone inactive before stop is requested', async ({
     page,
   }) => {

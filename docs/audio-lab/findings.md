@@ -7,7 +7,10 @@
 - iPhone standalone PWA mode still shows unstable behavior around microphone capture and playback-to-recording transitions.
 - `navigator.audioSession.type = "playback"` can block later microphone capture on iPhone.
 - Car mode has repeatedly produced empty recordings even when recording start and stop appear to succeed.
-- Hardware media controls in car mode have not yet been proven to fire reliably on the real device.
+- With CarPlay enabled on March 29, 2026, `nexttrack` and `previoustrack` did reach the PWA reliably in standalone mode.
+- In that same CarPlay run, `play`, `pause`, and `stop` never fired, so next/back are the only controls we should currently trust.
+- The metadata-only media probe was enough to receive next/back events; a silent loop was not required just to expose those controls.
+- Real-device recording can still produce a tiny first blob before a second take succeeds, so first-take warm-up remains a real issue.
 
 ## Working assumptions
 

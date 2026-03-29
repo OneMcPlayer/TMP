@@ -20,6 +20,7 @@ export interface RehearsalAppOptions {
   carMode?: boolean;
   latestVersion?: string;
   mediaRecorderAutoStopDelayMs?: number;
+  mediaRecorderBlobSizes?: number[];
   microphoneMode?: MicrophoneMode;
   rejectAudioPlayCallNumber?: number;
   script?: MockScript;
@@ -60,6 +61,7 @@ export async function setupRehearsalApp(
     carMode = false,
     latestVersion = '1.0.12',
     mediaRecorderAutoStopDelayMs = -1,
+    mediaRecorderBlobSizes = [],
     microphoneMode = 'normal',
     rejectAudioPlayCallNumber = -1,
     script = PARTNER_LEAD_SCRIPT,
@@ -74,6 +76,7 @@ export async function setupRehearsalApp(
       autoSpeakCorrections: initAutoSpeakCorrections,
       carMode: initCarMode,
       mediaRecorderAutoStopDelayMs: initMediaRecorderAutoStopDelayMs,
+      mediaRecorderBlobSizes: initMediaRecorderBlobSizes,
       microphoneMode: initMicrophoneMode,
       rejectAudioPlayCallNumber: initRejectAudioPlayCallNumber,
       selectedCharacter: initSelectedCharacter,
@@ -270,6 +273,7 @@ export async function setupRehearsalApp(
         state = 'inactive';
         ondataavailable: ((event: { data: Blob }) => void) | null = null;
         onstop: ((event: Event) => void) | null = null;
+        static blobIndex = 0;
 
         constructor(
           stream: { getTracks: () => Array<{ stop: () => void }> },
@@ -289,7 +293,7 @@ export async function setupRehearsalApp(
               }
 
               this.state = 'inactive';
-              const blob = new Blob(['playwright-audio'], { type: this.mimeType });
+              const blob = createMediaRecorderBlob(this.mimeType);
               this.ondataavailable?.({ data: blob });
               this.onstop?.(new Event('stop'));
             }, initMediaRecorderAutoStopDelayMs);
@@ -298,13 +302,24 @@ export async function setupRehearsalApp(
 
         stop() {
           this.state = 'inactive';
-          const blob = new Blob(['playwright-audio'], { type: this.mimeType });
+          const blob = createMediaRecorderBlob(this.mimeType);
 
           setTimeout(() => {
             this.ondataavailable?.({ data: blob });
             this.onstop?.(new Event('stop'));
           }, 0);
         }
+      }
+
+      function createMediaRecorderBlob(mimeType: string): Blob {
+        const configuredBlobSize = initMediaRecorderBlobSizes[FakeMediaRecorder.blobIndex];
+        FakeMediaRecorder.blobIndex += 1;
+
+        if (typeof configuredBlobSize === 'number' && configuredBlobSize >= 0) {
+          return new Blob(['x'.repeat(configuredBlobSize)], { type: mimeType });
+        }
+
+        return new Blob(['x'.repeat(4096)], { type: mimeType });
       }
 
       Object.defineProperty(window, 'MediaRecorder', {
@@ -352,6 +367,7 @@ export async function setupRehearsalApp(
       autoSpeakCorrections,
       carMode,
       mediaRecorderAutoStopDelayMs,
+      mediaRecorderBlobSizes,
       microphoneMode,
       rejectAudioPlayCallNumber,
       selectedCharacter,

@@ -38,6 +38,7 @@ import {
   playRecordingStartCue,
   primeAudioPlayback,
 } from '@/lib/openai';
+import { isSuspiciouslySmallRecordingBlob } from '@/lib/recording-quality';
 import {
   prepareMicrophoneAccess,
   preparePersistentMicrophoneAccess,
@@ -533,17 +534,22 @@ export default function AudioLabPage() {
     try {
       const audioBlob = await stopRecording();
       setLastRecordingBlob(audioBlob);
+      const suspiciouslySmall = isSuspiciouslySmallRecordingBlob(audioBlob.size);
       setRecordingSummary(
-        `Recording captured ${audioBlob.size} bytes as ${audioBlob.type || 'unknown mime type'}.`,
+        suspiciouslySmall
+          ? `Recording captured only ${audioBlob.size} bytes as ${audioBlob.type || 'unknown mime type'}. This looks like a tiny warm-up blob rather than a usable take.`
+          : `Recording captured ${audioBlob.size} bytes as ${audioBlob.type || 'unknown mime type'}.`,
       );
       appendLabLog(
         'Recording Captured',
         `size=${audioBlob.size} | type=${audioBlob.type || 'unknown'}`,
       );
       updateStepResult('recording', {
-        status: audioBlob.size > 0 ? 'success' : 'warning',
+        status: suspiciouslySmall ? 'warning' : audioBlob.size > 0 ? 'success' : 'warning',
         summary:
-          audioBlob.size > 0
+          suspiciouslySmall
+            ? 'Recording produced a tiny blob. Try the same test again and compare the second take.'
+            : audioBlob.size > 0
             ? 'Recording completed with audio data.'
             : 'Recording stopped, but the blob was empty.',
       });
