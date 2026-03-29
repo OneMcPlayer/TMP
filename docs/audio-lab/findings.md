@@ -19,6 +19,8 @@
 - That same `1.0.32` run also showed that the short playback cue can time out even after silent playback priming succeeds, which means cue reliability is another variable worth tracking explicitly.
 - Real-device recordings are better than they were earlier in the week, but blob sizes in the low-kilobyte range can still land in a gray area where the capture technically succeeded but may not represent a genuinely useful spoken take.
 - A later March 29, 2026 visual check showed that the standalone iPhone shell can still make the Audio Lab header feel cramped even when browser-based mobile tests pass, so phone-specific safe-area and shell chrome need to be treated as a separate concern from ordinary responsive layout.
+- A separate March 29, 2026 Expo Go native run on an iPhone 13 mini with iOS 18.7.2 produced a strong contrast with the PWA: native playback worked, cold recording worked, and playback-to-recording handoff also worked with usable recordings, which strongly suggests Safari/PWA is the main source of those failures rather than the product logic alone.
+- That same Expo Go run also showed `setActiveForLockScreen` was undefined in Expo Go 54.0.6 on-device, so lock-screen transport testing should currently be treated as unsupported in Expo Go even though native playback and recording themselves are promising.
 
 ## Working assumptions
 
@@ -40,6 +42,8 @@
 - Does the short cue at car-mode session start make the first next/back press work more reliably in the main app?
 - How often does the short cue itself time out after priming, and does that correlate with later media-control failures?
 - If we rerun the same playback and recording tests in Expo Go with native `expo-audio`, does the native stack remove the Safari-only autoplay and playback-to-recording failures enough to justify moving the fuller app off the PWA path?
+- If Expo Go already fixes the key playback and recording failures, is the next native experiment better framed as an EAS development build focused on lock-screen and transport-control behavior rather than more Expo Go wizard work?
+- If Expo Go playback and recording are already stable, does a more automatic native flow of cue playback followed by auto-start recording and a recording-start beep still remain usable in practice?
 
 ## How to use new evidence
 

@@ -10,3 +10,4 @@ test-results
 output
 .playwright-cli/
 .expo
+expo-go-audio-lab/*codespace*qr.svg

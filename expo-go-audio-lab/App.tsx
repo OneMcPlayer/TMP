@@ -29,7 +29,7 @@ import {
   View,
 } from 'react-native';
 
-const APP_VERSION = '1.1.1';
+const APP_VERSION = '1.1.3';
 const AUDIO_CUE = require('./assets/cue.wav');
 
 type ResultStatus = 'idle' | 'success' | 'warning' | 'error';
@@ -40,10 +40,11 @@ type StepId =
   | 'microphone'
   | 'recording-cold'
   | 'recording-handoff'
+  | 'recording-auto-beep'
   | 'lock-screen'
   | 'summary';
 
-type RecordingLabel = 'cold' | 'handoff';
+type RecordingLabel = 'auto-beep' | 'cold' | 'handoff';
 
 type LogEntry = {
   timestamp: string;
@@ -108,6 +109,11 @@ const STEP_ORDER: Array<{ description: string; id: StepId; title: string }> = [
     description: 'Play the cue, then switch immediately into recording to test the handoff Safari struggled with.',
   },
   {
+    id: 'recording-auto-beep',
+    title: 'Test auto-play to auto-record with a beep',
+    description: 'Play a lead-in cue, auto-start recording, then play a short beep right after recording begins to see if the user can be guided hands-free.',
+  },
+  {
     id: 'lock-screen',
     title: 'Try lock-screen play and pause',
     description: 'Arm native lock-screen playback, then use Control Center, lock screen, or headset play/pause.',
@@ -156,6 +162,10 @@ function createInitialResults(): Record<StepId, StepResult> {
     'recording-handoff': {
       status: 'idle',
       message: 'Run the playback-to-recording handoff to see if native audio avoids the Safari failure.',
+    },
+    'recording-auto-beep': {
+      status: 'idle',
+      message: 'Run the fully automatic cue, auto-record, and start-beep flow and judge whether it feels usable.',
     },
     'lock-screen': {
       status: 'idle',
@@ -223,6 +233,10 @@ export default function App() {
   });
   const cueStatus = useAudioPlayerStatus(cuePlayer);
 
+  const recordingBeepPlayer = useAudioPlayer(AUDIO_CUE, {
+    keepAudioSessionActive: true,
+  });
+
   const recordedClipPlayer = useAudioPlayer(null, {
     keepAudioSessionActive: true,
   });
@@ -250,10 +264,12 @@ export default function App() {
   const [lockScreenObservation, setLockScreenObservation] = useState<'unknown' | 'worked' | 'not-working'>('unknown');
 
   const handoffTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoBeepTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ignoreNextLockScreenPlayRef = useRef(false);
   const previousLockScreenPlayingRef = useRef(lockScreenStatus.playing);
 
   const currentStep = STEP_ORDER[currentStepIndex];
+  const supportsLockScreenControls = typeof lockScreenPlayer.setActiveForLockScreen === 'function';
 
   const addLog = useCallback((event: string, details?: string) => {
     setLogEntries((entries) => [
@@ -343,6 +359,17 @@ export default function App() {
     }
   }, [addLog, updateStepResult]);
 
+  const stepIdForRecordingLabel = useCallback((label: RecordingLabel): StepId => {
+    switch (label) {
+      case 'cold':
+        return 'recording-cold';
+      case 'handoff':
+        return 'recording-handoff';
+      case 'auto-beep':
+        return 'recording-auto-beep';
+    }
+  }, []);
+
   const startRecording = useCallback(
     async (label: RecordingLabel) => {
       try {
@@ -351,17 +378,36 @@ export default function App() {
         recorder.record();
         setActiveRecordingLabel(label);
         addLog('Recording Started', `mode=${label}`);
+        return true;
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Native recording could not start';
         addLog('Recording Start Failed', `mode=${label} | ${message}`);
-        updateStepResult(
-          label === 'cold' ? 'recording-cold' : 'recording-handoff',
-          'error',
-          message,
+        updateStepResult(stepIdForRecordingLabel(label), 'error', message);
+        return false;
+      }
+    },
+    [addLog, applyAudioMode, recorder, stepIdForRecordingLabel, updateStepResult],
+  );
+
+  const startRecordingWithBeep = useCallback(
+    async (label: Extract<RecordingLabel, 'auto-beep'>) => {
+      const started = await startRecording(label);
+      if (!started) {
+        return;
+      }
+
+      try {
+        await recordingBeepPlayer.seekTo(0);
+        recordingBeepPlayer.play();
+        addLog('Recording Start Beep Played', `mode=${label}`);
+      } catch (error) {
+        addLog(
+          'Recording Start Beep Failed',
+          error instanceof Error ? `mode=${label} | ${error.message}` : `mode=${label} | unknown failure`,
         );
       }
     },
-    [addLog, applyAudioMode, recorder, updateStepResult],
+    [addLog, recordingBeepPlayer, startRecording],
   );
 
   const stopRecording = useCallback(async () => {
@@ -392,7 +438,7 @@ export default function App() {
         `mode=${activeRecordingLabel} | size=${recordingResult.size} | uri=${uri}`,
       );
       updateStepResult(
-        activeRecordingLabel === 'cold' ? 'recording-cold' : 'recording-handoff',
+        stepIdForRecordingLabel(activeRecordingLabel),
         recordingResult.size > 0 ? 'success' : 'warning',
         recordingResult.size > 0
           ? `Native recording completed with ${recordingResult.size} bytes.`
@@ -401,15 +447,11 @@ export default function App() {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Stopping the native recorder failed';
       addLog('Recording Stop Failed', `mode=${activeRecordingLabel} | ${message}`);
-      updateStepResult(
-        activeRecordingLabel === 'cold' ? 'recording-cold' : 'recording-handoff',
-        'error',
-        message,
-      );
+      updateStepResult(stepIdForRecordingLabel(activeRecordingLabel), 'error', message);
     } finally {
       setActiveRecordingLabel(null);
     }
-  }, [activeRecordingLabel, addLog, recorder, updateStepResult]);
+  }, [activeRecordingLabel, addLog, recorder, stepIdForRecordingLabel, updateStepResult]);
 
   const playRecordedClip = useCallback(
     async (label: RecordingLabel) => {
@@ -459,8 +501,50 @@ export default function App() {
     }
   }, [addLog, applyAudioMode, cuePlayer, startRecording, updateStepResult]);
 
+  const runAutoBeepRecording = useCallback(async () => {
+    try {
+      await applyAudioMode('playback', PLAYBACK_MODE);
+      await cuePlayer.seekTo(0);
+      cuePlayer.play();
+      addLog(
+        'Auto Beep Cue Started',
+        'Lead-in cue is playing. Recording will auto-start and play a short beep once the recorder is live.',
+      );
+      updateStepResult(
+        'recording-auto-beep',
+        'idle',
+        'Lead-in cue started. Speak after the recording-start beep plays.',
+      );
+
+      if (autoBeepTimeoutRef.current) {
+        clearTimeout(autoBeepTimeoutRef.current);
+      }
+
+      autoBeepTimeoutRef.current = setTimeout(() => {
+        void startRecordingWithBeep('auto-beep');
+      }, 820);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Automatic cue-to-record-with-beep test could not start';
+      addLog('Auto Beep Cue Failed', message);
+      updateStepResult('recording-auto-beep', 'error', message);
+    }
+  }, [addLog, applyAudioMode, cuePlayer, startRecordingWithBeep, updateStepResult]);
+
   const armLockScreenPlayback = useCallback(async () => {
     try {
+      if (!supportsLockScreenControls) {
+        addLog(
+          'Lock Screen Playback Unsupported',
+          'setActiveForLockScreen is unavailable in this Expo Go runtime.',
+        );
+        updateStepResult(
+          'lock-screen',
+          'warning',
+          'This Expo Go runtime does not expose the native lock-screen playback API.',
+        );
+        return;
+      }
+
       await applyAudioMode('playback', PLAYBACK_MODE);
       setLockScreenCounts({ play: 0, pause: 0 });
       setLockScreenObservation('unknown');
@@ -493,12 +577,17 @@ export default function App() {
       addLog('Lock Screen Playback Failed', message);
       updateStepResult('lock-screen', 'error', message);
     }
-  }, [addLog, applyAudioMode, lockScreenPlayer, updateStepResult]);
+  }, [addLog, applyAudioMode, lockScreenPlayer, supportsLockScreenControls, updateStepResult]);
 
   const stopLockScreenPlayback = useCallback(() => {
     lockScreenPlayer.pause();
-    lockScreenPlayer.clearLockScreenControls();
-    addLog('Lock Screen Playback Stopped', 'Looping native playback was stopped and lock-screen controls were cleared.');
+    if (typeof lockScreenPlayer.clearLockScreenControls === 'function') {
+      lockScreenPlayer.clearLockScreenControls();
+    }
+    addLog(
+      'Lock Screen Playback Stopped',
+      'Looping native playback was stopped and any available lock-screen controls were cleared.',
+    );
   }, [addLog, lockScreenPlayer]);
 
   useEffect(() => {
@@ -513,10 +602,16 @@ export default function App() {
       if (handoffTimeoutRef.current) {
         clearTimeout(handoffTimeoutRef.current);
       }
-      lockScreenPlayer.clearLockScreenControls();
+      if (autoBeepTimeoutRef.current) {
+        clearTimeout(autoBeepTimeoutRef.current);
+      }
+      if (typeof lockScreenPlayer.clearLockScreenControls === 'function') {
+        lockScreenPlayer.clearLockScreenControls();
+      }
       lockScreenPlayer.pause();
+      recordingBeepPlayer.pause();
     };
-  }, [addLog, lockScreenPlayer]);
+  }, [addLog, lockScreenPlayer, recordingBeepPlayer]);
 
   useEffect(() => {
     if (!cueStatus.didJustFinish) {
@@ -558,6 +653,7 @@ export default function App() {
   const reportText = useMemo(() => {
     const coldRecording = recordings.cold;
     const handoffRecording = recordings.handoff;
+    const autoBeepRecording = recordings['auto-beep'];
 
     return [
       'Expo Native Audio Lab Report',
@@ -587,9 +683,11 @@ export default function App() {
       'Recording',
       `Cold recording: ${coldRecording ? `${coldRecording.size} bytes` : 'not captured'}`,
       `Handoff recording: ${handoffRecording ? `${handoffRecording.size} bytes` : 'not captured'}`,
+      `Auto-beep recording: ${autoBeepRecording ? `${autoBeepRecording.size} bytes` : 'not captured'}`,
       '',
       'Lock Screen Controls',
       'Expo Go SDK 54 does not expose next/back transport callbacks in this experiment build.',
+      `Lock-screen API support: ${supportsLockScreenControls ? 'available' : 'not available in this Expo Go runtime'}`,
       `Observed play transitions: ${lockScreenCounts.play}`,
       `Observed pause transitions: ${lockScreenCounts.pause}`,
       `Tester outcome: ${lockScreenObservation}`,
@@ -603,7 +701,7 @@ export default function App() {
       'Debug Log',
       formatLogEntries(logEntries),
     ].join('\n');
-  }, [audioModeHistory, lockScreenCounts.pause, lockScreenCounts.play, lockScreenObservation, logEntries, microphoneGranted, notes, playbackOutcome, recordings.cold, recordings.handoff, snapshot, stepResults]);
+  }, [audioModeHistory, lockScreenCounts.pause, lockScreenCounts.play, lockScreenObservation, logEntries, microphoneGranted, notes, playbackOutcome, recordings.cold, recordings.handoff, recordings['auto-beep'], snapshot, stepResults, supportsLockScreenControls]);
 
   const handleCopyReport = useCallback(async () => {
     await Clipboard.setStringAsync(reportText);
@@ -791,14 +889,64 @@ export default function App() {
           </View>
         );
 
+      case 'recording-auto-beep':
+        return (
+          <View style={styles.sectionStack}>
+            <Text style={styles.bodyText}>
+              This runs the closest native equivalent of the hands-free flow you want to try: lead-in cue, automatic switch to recording, then a beep right after recording starts so the user knows when to speak.
+            </Text>
+            <View style={styles.rowActions}>
+              <ActionButton label="Run Auto Cue + Beep Record" onPress={() => void runAutoBeepRecording()} />
+              <ActionButton label="Stop Recording" onPress={() => void stopRecording()} tone="dark" />
+            </View>
+            <View style={styles.rowActions}>
+              <SecondaryButton
+                label="Play Auto-Beep Clip"
+                onPress={() => void playRecordedClip('auto-beep')}
+                disabled={!recordings['auto-beep']?.uri}
+              />
+              <SecondaryButton
+                label="Mark Usable"
+                onPress={() => {
+                  addLog('Recording Observation', `mode=auto-beep | tester=usable | blob=${recordings['auto-beep']?.size ?? 0}`);
+                  updateStepResult('recording-auto-beep', 'success', `Auto cue + beep recording felt usable (${recordings['auto-beep']?.size ?? 0} bytes).`);
+                }}
+              />
+              <SecondaryButton
+                label="Mark Broken"
+                onPress={() => {
+                  addLog('Recording Observation', `mode=auto-beep | tester=broken | blob=${recordings['auto-beep']?.size ?? 0}`);
+                  updateStepResult('recording-auto-beep', 'warning', `Auto cue + beep recording still failed or felt unreliable (${recordings['auto-beep']?.size ?? 0} bytes).`);
+                }}
+              />
+            </View>
+            <InfoCard title="Auto-beep recording">
+              <InfoRow label="Recording now" value={activeRecordingLabel === 'auto-beep' ? 'yes' : 'no'} />
+              <InfoRow label="Current duration" value={`${Math.round(recorderState.durationMillis / 100) / 10}s`} />
+              <InfoRow label="Last file size" value={recordings['auto-beep'] ? `${recordings['auto-beep'].size} bytes` : 'none'} />
+            </InfoCard>
+          </View>
+        );
+
       case 'lock-screen':
         return (
           <View style={styles.sectionStack}>
             <Text style={styles.bodyText}>
               Expo Go on this SDK does not expose direct next/back callbacks, so this step focuses on native lock-screen play and pause instead.
             </Text>
+            {!supportsLockScreenControls ? (
+              <InfoCard title="Lock-screen support">
+                <Text style={styles.mutedText}>
+                  This Expo Go runtime does not expose the native lock-screen playback API, so this step is informational on this device/runtime pair.
+                </Text>
+              </InfoCard>
+            ) : null}
             <View style={styles.rowActions}>
-              <ActionButton label="Arm Lock-Screen Playback" onPress={() => void armLockScreenPlayback()} />
+              <ActionButton
+                label="Arm Lock-Screen Playback"
+                onPress={() => void armLockScreenPlayback()}
+                disabled={!supportsLockScreenControls}
+              />
               <ActionButton label="Stop Loop" onPress={stopLockScreenPlayback} tone="dark" />
             </View>
             <View style={styles.rowActions}>
@@ -972,10 +1120,12 @@ function InfoRow({
 }
 
 function ActionButton({
+  disabled = false,
   label,
   onPress,
   tone = 'primary',
 }: {
+  disabled?: boolean;
   label: string;
   onPress: () => void;
   tone?: 'dark' | 'primary';
@@ -985,9 +1135,11 @@ function ActionButton({
       style={({ pressed }) => [
         styles.actionButton,
         tone === 'dark' ? styles.actionButtonDark : styles.actionButtonPrimary,
-        pressed && styles.actionButtonPressed,
+        disabled && styles.footerButtonDisabled,
+        pressed && !disabled && styles.actionButtonPressed,
       ]}
       onPress={onPress}
+      disabled={disabled}
     >
       <Text style={styles.actionButtonText}>{label}</Text>
     </Pressable>
