@@ -1374,14 +1374,14 @@ export default function AudioLabPage() {
 
   return (
     <div data-testid="audio-lab-page" className="flex min-h-screen flex-col overflow-hidden bg-background">
-      <header className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/85">
-        <div className="mx-auto flex max-w-5xl items-start justify-between gap-4 px-4 py-4 sm:items-center sm:px-6 lg:px-8">
+      <header className="safe-area-top safe-area-x border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/85">
+        <div className="mx-auto flex max-w-5xl items-start justify-between gap-4 px-4 py-3 sm:items-center sm:px-6 sm:py-4 lg:px-8">
           <div className="min-w-0">
             <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.25em] text-muted-foreground">
               <TestTube2 className="h-4 w-4 text-primary" />
               Audio Lab
             </div>
-            <h1 className="mt-1 text-lg font-semibold tracking-tight sm:text-xl">
+            <h1 className="mt-1 text-base font-semibold tracking-tight sm:text-xl">
               iPhone PWA Audio Test Wizard
             </h1>
           </div>
@@ -1398,7 +1398,7 @@ export default function AudioLabPage() {
         </div>
       </header>
 
-      <main className="mx-auto flex min-h-0 flex-1 max-w-5xl flex-col px-4 py-4 sm:px-6 lg:px-8">
+      <main className="safe-area-x safe-area-bottom mx-auto flex min-h-0 flex-1 max-w-5xl flex-col px-4 py-4 sm:px-6 lg:px-8">
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-[0.25em] text-muted-foreground">
@@ -1406,7 +1406,7 @@ export default function AudioLabPage() {
             </p>
             <h2
               data-testid="audio-lab-step-title"
-              className="mt-1 text-xl font-semibold tracking-tight sm:text-2xl"
+              className="mt-1 text-lg font-semibold tracking-tight sm:text-2xl"
             >
               {currentStep.title}
             </h2>
@@ -1457,14 +1457,14 @@ export default function AudioLabPage() {
             <CardDescription>{currentStepResult.summary}</CardDescription>
           </CardHeader>
 
-          <CardContent className="flex min-h-0 flex-1 flex-col gap-5 p-5">
+          <CardContent className="flex min-h-0 flex-1 flex-col gap-5 p-4 sm:p-5">
             <div className="min-h-0 flex-1 overflow-auto pr-1">{renderCurrentStepContent()}</div>
 
-            <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex w-full items-center justify-between gap-3 sm:w-auto">
+            <div className="flex flex-col gap-3 border-t pt-4">
+              <div className="grid w-full grid-cols-1 gap-3 sm:flex sm:w-auto sm:items-center sm:justify-between">
                 <Button
                   data-testid="button-audio-lab-previous-step"
-                  className="flex-1 sm:flex-none"
+                  className="w-full sm:flex-none"
                   variant="outline"
                   onClick={() => goToStep(currentStepIndex - 1)}
                   disabled={isFirstStep}
@@ -1475,7 +1475,7 @@ export default function AudioLabPage() {
 
                 <Button
                   data-testid="button-audio-lab-next-step"
-                  className="flex-1 sm:flex-none"
+                  className="w-full sm:flex-none"
                   onClick={() => goToStep(currentStepIndex + 1)}
                   disabled={isLastStep}
                 >
@@ -1484,7 +1484,7 @@ export default function AudioLabPage() {
                 </Button>
               </div>
 
-              <p className="text-center text-xs text-muted-foreground sm:max-w-xs sm:text-right">
+              <p className="hidden text-center text-xs text-muted-foreground sm:block sm:max-w-xs sm:self-end sm:text-right">
                 This wizard is meant to answer the current open questions one phase at a time.
               </p>
             </div>
