@@ -9,7 +9,7 @@ import {
 } from './helpers/rehearsal-app';
 
 test.describe('rehearsal browser e2e', () => {
-  test('opens the audio lab from the launch screen and records media control events', async ({
+  test('opens the audio lab wizard, records media control events, and keeps the log for export', async ({
     page,
   }) => {
     await setupRehearsalApp(page, {
@@ -19,6 +19,10 @@ test.describe('rehearsal browser e2e', () => {
 
     await page.getByTestId('button-open-audio-lab').click();
     await expect(page.getByTestId('audio-lab-page')).toBeVisible();
+    await expect(page.getByTestId('audio-lab-step-title')).toContainText('Capture The Baseline Snapshot');
+    await page.getByTestId('button-audio-lab-capture-environment').click();
+    await page.getByTestId('button-audio-lab-next-step').click();
+    await expect(page.getByTestId('audio-lab-step-title')).toContainText('Try Next And Back Before Any Other Audio');
     await page.getByTestId('button-audio-lab-metadata-probe').click();
 
     await page.evaluate(() => {
@@ -29,8 +33,12 @@ test.describe('rehearsal browser e2e', () => {
       ).__e2eMediaSessionHandlers?.nexttrack?.();
     });
 
+    await expect(page.getByTestId('audio-lab-next-count')).toHaveText('1');
+    await expect(page.getByTestId('audio-lab-probe-mode')).toContainText('metadata-only');
+
+    await page.getByTestId('button-audio-lab-step-summary').click();
+    await expect(page.getByTestId('audio-lab-step-title')).toContainText('Review The Findings And Export Everything');
     await expect(page.getByTestId('audio-lab-log')).toContainText('action=nexttrack | count=1');
-    await expect(page.getByText('Current probe:')).toContainText('metadata-only');
   });
 
   test('keeps the settings button available on the launch screen', async ({ page }) => {
@@ -466,6 +474,25 @@ test.describe('rehearsal mobile layout e2e', () => {
     await completeDeviceSetup(page);
     await page.getByTestId('button-start-rehearsal').click();
     await expect(page.getByTestId('car-mode-stage')).toBeVisible();
+
+    const viewportHeights = await page.evaluate(() => ({
+      bodyScrollHeight: document.body.scrollHeight,
+      documentScrollHeight: document.documentElement.scrollHeight,
+      innerHeight: window.innerHeight,
+    }));
+
+    expect(viewportHeights.bodyScrollHeight).toBeLessThanOrEqual(viewportHeights.innerHeight + 1);
+    expect(viewportHeights.documentScrollHeight).toBeLessThanOrEqual(viewportHeights.innerHeight + 1);
+  });
+
+  test('keeps the audio lab wizard on a fixed mobile viewport without page scroll', async ({ page }) => {
+    await setupRehearsalApp(page, {
+      script: PARTNER_LEAD_SCRIPT,
+      selectedCharacter: 'BOB',
+    });
+
+    await page.getByTestId('button-open-audio-lab').click();
+    await expect(page.getByTestId('audio-lab-page')).toBeVisible();
 
     const viewportHeights = await page.evaluate(() => ({
       bodyScrollHeight: document.body.scrollHeight,

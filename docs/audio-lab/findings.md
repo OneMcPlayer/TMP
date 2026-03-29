@@ -15,6 +15,9 @@
 - Because of that, the main app now keeps `mediaSession.playbackState = "playing"` while an active car-mode session is on screen and logs incoming media-control events directly in the rehearsal debug log.
 - Another March 29, 2026 Audio Lab run suggested next/back events were easier to trigger only after other explicit interactions such as probe arming, playback, or recording steps, which points to session arming order as part of the problem.
 - The main car-mode flow now tries to imitate that pattern by arming the media session earlier and playing a short cue at session start.
+- A later March 29, 2026 `1.0.32` run still showed that Audio Lab could eventually receive next/back events while the main rehearsal car mode did not, so the lab remains the more trustworthy source of capability evidence.
+- That same `1.0.32` run also showed that the short playback cue can time out even after silent playback priming succeeds, which means cue reliability is another variable worth tracking explicitly.
+- Real-device recordings are better than they were earlier in the week, but blob sizes in the low-kilobyte range can still land in a gray area where the capture technically succeeded but may not represent a genuinely useful spoken take.
 
 ## Working assumptions
 
@@ -25,13 +28,16 @@
 
 ## Current open questions
 
-- Does a metadata-only `mediaSession` ever surface working next/back events in the car?
+- Does a metadata-only `mediaSession` ever surface working next/back events in the car before any other explicit audio action?
+- Which exact step is most likely to wake controls up on the phone: metadata-only probe, silent loop, playback cue, audio-session change, or recording?
 - Do transport events only appear when continuous audio is actively playing?
 - Does a persistent warm microphone stream help in standalone mode, or does it only make routing more fragile?
 - Which audio session type produces the least harmful tradeoff between playback audibility and microphone capture?
+- What blob-size threshold is the most useful line between a warm-up artifact and a genuinely usable short take?
 - Are failures different between standalone PWA, Safari tab, lock screen, and connected car audio routes?
 - After the latest main-app arming change, do `Media Control Triggered` entries now appear in the regular rehearsal debug log during real CarPlay use?
 - Does the short cue at car-mode session start make the first next/back press work more reliably in the main app?
+- How often does the short cue itself time out after priming, and does that correlate with later media-control failures?
 
 ## How to use new evidence
 

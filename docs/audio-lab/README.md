@@ -28,16 +28,27 @@ The app uses a hash route on purpose so it still works under GitHub Pages and st
 
 ## What to test
 
-The page walks through six areas:
+The page is now a full-screen step-by-step wizard instead of one long scrolling dashboard.
+
+The current sequence is:
 
 1. Environment snapshot
-2. Playback
-3. Audio session modes
-4. Microphone permission and warm-stream behavior
-5. Recording
-6. Media controls
+2. Media controls before any other audio activity
+3. Playback cue
+4. Media controls after playback
+5. Audio session modes
+6. Microphone permission and warm-stream behavior
+7. Recording
+8. Media controls after recording
+9. Final notes and export
 
-At the end, add device notes and export a report as text or JSON.
+Each media-controls step has explicit buttons for:
+
+- `It Worked`
+- `Not Working Yet`
+- `Repeated / Bursty`
+
+That keeps the run simple on a phone while still producing a much more useful exported report.
 
 ## What to save
 
@@ -56,5 +67,6 @@ When running a real-device session, try to keep:
 - It does not assume autoplay success means audible output was actually heard.
 - It does not assume media-session handlers fire just because the page set them.
 - It does not assume a successful recording start means non-empty audio was captured.
+- It does not assume car controls work before playback, or before recording, just because they work later in the session.
 
 Those are exactly the assumptions the lab is trying to verify.

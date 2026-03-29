@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ThemeToggle } from '@/components/theme-toggle';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -49,11 +48,12 @@ import { cn } from '@/lib/utils';
 import {
   ArrowLeft,
   AudioLines,
+  ChevronLeft,
+  ChevronRight,
   Copy,
   Download,
   Ear,
   FileText,
-  Gauge,
   ListRestart,
   Mic,
   Music2,
@@ -81,15 +81,25 @@ const SILENT_CONTROL_PROBE_DATA_URI =
 
 type AudioLabStepKey =
   | 'environment'
+  | 'media-baseline'
   | 'playback'
+  | 'media-after-playback'
   | 'audio-session'
   | 'microphone'
   | 'recording'
-  | 'media-controls';
+  | 'media-after-recording'
+  | 'summary';
+
+type MediaCheckStepKey =
+  | 'media-baseline'
+  | 'media-after-playback'
+  | 'media-after-recording';
 
 type ProbeMode = 'inactive' | 'metadata-only' | 'silent-loop';
 type PlaybackObservation = 'unknown' | 'heard' | 'not-heard';
 type RecordingMode = 'normal' | 'car';
+type MediaObservation = 'worked' | 'not-working' | 'bursty';
+type RecordingObservation = 'usable' | 'not-usable';
 type MediaActionName =
   | 'play'
   | 'pause'
@@ -119,30 +129,113 @@ const INITIAL_MEDIA_ACTION_COUNTS: AudioLabMediaActionCounts = {
   seekbackward: 0,
 };
 
+const AUDIO_LAB_WIZARD_STEPS: Array<{
+  key: AudioLabStepKey;
+  label: string;
+  title: string;
+  description: string;
+}> = [
+  {
+    key: 'environment',
+    label: 'Snapshot',
+    title: 'Capture The Baseline Snapshot',
+    description:
+      'Start by saving the runtime and service-worker state before you touch playback, microphone, or car controls.',
+  },
+  {
+    key: 'media-baseline',
+    label: 'Controls 1',
+    title: 'Try Next And Back Before Any Other Audio',
+    description:
+      'This step answers the first open question directly: do car controls reach the PWA immediately, or only after later audio activity?',
+  },
+  {
+    key: 'playback',
+    label: 'Playback',
+    title: 'Check Playback Priming And The Audible Cue',
+    description:
+      'Prime audio, play the short cue, and record whether you actually heard it on the device.',
+  },
+  {
+    key: 'media-after-playback',
+    label: 'Controls 2',
+    title: 'Try Next And Back Again After Playback',
+    description:
+      'If the controls only wake up after real audio playback, this step should be more reliable than the baseline check.',
+  },
+  {
+    key: 'audio-session',
+    label: 'Session',
+    title: 'Compare Audio Session Modes',
+    description:
+      'Request `auto`, `playback`, and `play-and-record`, then watch how later microphone and recording steps react.',
+  },
+  {
+    key: 'microphone',
+    label: 'Mic',
+    title: 'Test One-Time Mic Permission And Warm Stream',
+    description:
+      'Check whether ordinary permission and the persistent car-style stream both succeed under the current session mode.',
+  },
+  {
+    key: 'recording',
+    label: 'Recording',
+    title: 'Record A Short Clip And Judge The Result',
+    description:
+      'Record a short sample, inspect the blob size, and mark whether the take was actually usable.',
+  },
+  {
+    key: 'media-after-recording',
+    label: 'Controls 3',
+    title: 'Try Next And Back One More Time After Recording',
+    description:
+      'This final controls check tells us whether recording activity is what finally wakes car transport events up.',
+  },
+  {
+    key: 'summary',
+    label: 'Export',
+    title: 'Review The Findings And Export Everything',
+    description:
+      'Save the detailed report, keep the raw log, and add any device notes that would help future debugging.',
+  },
+];
+
 const INITIAL_STEP_RESULTS: Record<AudioLabStepKey, AudioLabStepResult> = {
   environment: {
     status: 'idle',
-    summary: 'Capture a runtime snapshot and service worker snapshot.',
+    summary: 'Capture the runtime snapshot and the service-worker snapshot first.',
+  },
+  'media-baseline': {
+    status: 'idle',
+    summary: 'Arm a probe before any other audio activity and try next/back once.',
   },
   playback: {
     status: 'idle',
-    summary: 'Prime playback and confirm whether you hear the test cue.',
+    summary: 'Prime playback, play the cue, and mark whether you actually heard it.',
+  },
+  'media-after-playback': {
+    status: 'idle',
+    summary: 'Repeat the next/back test after audible playback.',
   },
   'audio-session': {
     status: 'idle',
-    summary: 'Try the supported audio session modes and watch for state changes.',
+    summary: 'Try the supported audio session modes and watch the live state.',
   },
   microphone: {
     status: 'idle',
-    summary: 'Check one-time mic permission and the persistent warm stream path.',
+    summary: 'Check one-time permission and the persistent warm microphone stream.',
   },
   recording: {
     status: 'idle',
-    summary: 'Run a manual recording in normal or car-style mode.',
+    summary: 'Run a recording and inspect whether the captured blob is actually usable.',
   },
-  'media-controls': {
+  'media-after-recording': {
     status: 'idle',
-    summary: 'Arm the car-control probe and watch which media buttons fire.',
+    summary: 'Run a final next/back test after microphone and recording activity.',
+  },
+  summary: {
+    status: 'idle',
+    summary: 'Add notes and export the full report when the run is complete.',
   },
 };
 
@@ -194,21 +287,6 @@ function setMediaSessionActionHandler(
   }
 }
 
-function formatActionLabel(action: MediaActionName): string {
-  switch (action) {
-    case 'nexttrack':
-      return 'Next track';
-    case 'previoustrack':
-      return 'Previous track';
-    case 'seekforward':
-      return 'Seek forward';
-    case 'seekbackward':
-      return 'Seek backward';
-    default:
-      return action[0].toUpperCase() + action.slice(1);
-  }
-}
-
 function setMediaSessionMetadata(title: string, album: string): void {
   if (
     typeof window === 'undefined' ||
@@ -226,7 +304,131 @@ function setMediaSessionMetadata(title: string, album: string): void {
   });
 }
 
+function formatActionLabel(action: MediaActionName): string {
+  switch (action) {
+    case 'nexttrack':
+      return 'Next track';
+    case 'previoustrack':
+      return 'Previous track';
+    case 'seekforward':
+      return 'Seek forward';
+    case 'seekbackward':
+      return 'Seek backward';
+    default:
+      return action[0].toUpperCase() + action.slice(1);
+  }
+}
+
+function getWizardStepMeta(stepKey: AudioLabStepKey) {
+  return AUDIO_LAB_WIZARD_STEPS.find((step) => step.key === stepKey) ?? AUDIO_LAB_WIZARD_STEPS[0];
+}
+
+function isMediaCheckStepKey(stepKey: AudioLabStepKey): stepKey is MediaCheckStepKey {
+  return (
+    stepKey === 'media-baseline' ||
+    stepKey === 'media-after-playback' ||
+    stepKey === 'media-after-recording'
+  );
+}
+
+function formatMediaCountsSummary(counts: AudioLabMediaActionCounts): string {
+  return `next=${counts.nexttrack}, previous=${counts.previoustrack}, play=${counts.play}, pause=${counts.pause}, stop=${counts.stop}`;
+}
+
+function buildMediaObservationResult(
+  outcome: MediaObservation,
+  counts: AudioLabMediaActionCounts,
+  probeMode: ProbeMode,
+): AudioLabStepResult {
+  const countSummary = formatMediaCountsSummary(counts);
+
+  if (outcome === 'worked') {
+    return {
+      status: 'success',
+      summary: `Tester confirmed the controls worked with ${probeMode}. Counts: ${countSummary}.`,
+    };
+  }
+
+  if (outcome === 'bursty') {
+    return {
+      status: 'warning',
+      summary: `Controls fired, but the tester reported bursty or repeated events with ${probeMode}. Counts: ${countSummary}.`,
+    };
+  }
+
+  return {
+    status: 'warning',
+    summary: `Tester reported no useful next/back events yet with ${probeMode}. Counts: ${countSummary}.`,
+  };
+}
+
+function buildRecordingObservationResult(
+  outcome: RecordingObservation,
+  blob: Blob | null,
+  recordingSummary: string,
+): AudioLabStepResult {
+  if (outcome === 'usable') {
+    return {
+      status: 'success',
+      summary: `Tester marked the latest recording as usable. ${recordingSummary}`,
+    };
+  }
+
+  return {
+    status: 'warning',
+    summary: `Tester marked the latest recording as unusable. ${blob ? `Blob size=${blob.size}. ` : ''}${recordingSummary}`,
+  };
+}
+
+function StepCountPanel({
+  counts,
+  probeMode,
+}: {
+  counts: AudioLabMediaActionCounts;
+  probeMode: ProbeMode;
+}) {
+  return (
+    <div className="rounded-3xl border border-border/60 bg-muted/30 p-4">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm font-medium">Current control counts</p>
+        <Badge data-testid="audio-lab-probe-mode" variant="outline">
+          {probeMode}
+        </Badge>
+      </div>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <div
+          data-testid="audio-lab-next-count-card"
+          className="rounded-2xl border border-border/60 bg-background/70 p-4"
+        >
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+            Next Track
+          </p>
+          <p data-testid="audio-lab-next-count" className="mt-2 text-3xl font-semibold">
+            {counts.nexttrack}
+          </p>
+        </div>
+        <div
+          data-testid="audio-lab-previous-count-card"
+          className="rounded-2xl border border-border/60 bg-background/70 p-4"
+        >
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+            Previous Track
+          </p>
+          <p data-testid="audio-lab-previous-count" className="mt-2 text-3xl font-semibold">
+            {counts.previoustrack}
+          </p>
+        </div>
+      </div>
+      <p className="mt-3 text-sm text-muted-foreground">
+        Other actions: play {counts.play}, pause {counts.pause}, stop {counts.stop}, seek forward{' '}
+        {counts.seekforward}, seek backward {counts.seekbackward}.
+      </p>
+    </div>
+  );
+}
+
 export default function AudioLabPage() {
+  const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const [debugLogEntries, setDebugLogEntries] = useState<DebugLogEntry[]>(() =>
     consumeQueuedPwaDebugLogs(),
   );
@@ -243,16 +445,19 @@ export default function AudioLabPage() {
     'Persistent car-mode stream has not been opened yet.',
   );
   const [recordingMode, setRecordingMode] = useState<RecordingMode>('normal');
-  const [recordingSummary, setRecordingSummary] = useState(
-    'No recording test has completed yet.',
-  );
+  const [recordingSummary, setRecordingSummary] = useState('No recording test has completed yet.');
   const [lastRecordingBlob, setLastRecordingBlob] = useState<Blob | null>(null);
   const [probeMode, setProbeMode] = useState<ProbeMode>('inactive');
   const [mediaActionCounts, setMediaActionCounts] = useState(INITIAL_MEDIA_ACTION_COUNTS);
   const [testerNotes, setTesterNotes] = useState('');
+  const [recordingObservation, setRecordingObservation] = useState<RecordingObservation | null>(
+    null,
+  );
   const warmStreamRef = useRef<MediaStream | null>(null);
   const controlProbeAudioRef = useRef<HTMLAudioElement | null>(null);
   const isUnmountingRef = useRef(false);
+  const activeMediaStepRef = useRef<MediaCheckStepKey | null>(null);
+  const previousStepKeyRef = useRef<AudioLabStepKey | null>(null);
   const {
     startRecording,
     stopRecording,
@@ -262,6 +467,11 @@ export default function AudioLabPage() {
     carMode: recordingMode === 'car',
     silenceTimeoutMs: 5000,
   });
+
+  const currentStep = AUDIO_LAB_WIZARD_STEPS[currentStepIndex];
+  const currentStepResult = stepResults[currentStep.key];
+  const isFirstStep = currentStepIndex === 0;
+  const isLastStep = currentStepIndex === AUDIO_LAB_WIZARD_STEPS.length - 1;
 
   const appendLabLog = useCallback((event: string, details?: string) => {
     setDebugLogEntries((currentEntries) =>
@@ -293,6 +503,7 @@ export default function AudioLabPage() {
       probeAudio.currentTime = 0;
     }
 
+    activeMediaStepRef.current = null;
     setProbeMode('inactive');
     setMediaSessionPlaybackState('paused');
     setMediaSessionMetadata('Audio Lab', 'Probe stopped');
@@ -318,24 +529,32 @@ export default function AudioLabPage() {
 
     MEDIA_ACTIONS.forEach((action) => {
       setMediaSessionActionHandler(action, () => {
+        const activeStepKey = activeMediaStepRef.current;
+
         setMediaActionCounts((counts) => {
-          const nextCount = counts[action] + 1;
-          appendLabLog('Media Control Triggered', `action=${action} | count=${nextCount}`);
-
-          updateStepResult('media-controls', {
-            status: 'success',
-            summary: `${formatActionLabel(action)} fired. Hardware media controls are reaching the page.`,
-          });
-
-          return {
+          const nextCounts = {
             ...counts,
-            [action]: nextCount,
+            [action]: counts[action] + 1,
           };
+
+          appendLabLog(
+            'Media Control Triggered',
+            `step=${activeStepKey ?? 'none'} | action=${action} | count=${nextCounts[action]}`,
+          );
+
+          if (activeStepKey) {
+            updateStepResult(activeStepKey, {
+              status: 'success',
+              summary: `${formatActionLabel(action)} fired. Counts: ${formatMediaCountsSummary(nextCounts)}.`,
+            });
+          }
+
+          return nextCounts;
         });
       });
     });
 
-    setMediaSessionMetadata('Audio Lab', 'Waiting for hardware controls');
+    setMediaSessionMetadata('Audio Lab', 'Waiting for step actions');
 
     return () => {
       isUnmountingRef.current = true;
@@ -351,6 +570,18 @@ export default function AudioLabPage() {
   }, [appendLabLog, stopControlProbe, syncAudioSessionSnapshot, updateStepResult]);
 
   useEffect(() => {
+    appendLabLog('Audio Lab Step Opened', `step=${currentStep.key}`);
+  }, [appendLabLog, currentStep.key]);
+
+  useEffect(() => {
+    const previousStepKey = previousStepKeyRef.current;
+    if (previousStepKey && isMediaCheckStepKey(previousStepKey) && previousStepKey !== currentStep.key) {
+      stopControlProbe();
+    }
+    previousStepKeyRef.current = currentStep.key;
+  }, [currentStep.key, stopControlProbe]);
+
+  useEffect(() => {
     if (!recordingError) {
       return;
     }
@@ -363,14 +594,19 @@ export default function AudioLabPage() {
     appendLabLog('Recording Error', recordingError);
   }, [appendLabLog, recordingError, updateStepResult]);
 
+  const goToStep = useCallback((nextIndex: number) => {
+    setCurrentStepIndex(Math.min(Math.max(nextIndex, 0), AUDIO_LAB_WIZARD_STEPS.length - 1));
+  }, []);
+
   const handleCaptureEnvironment = useCallback(async () => {
     await capturePwaRuntimeDiagnostics(APP_VERSION, 'Audio Lab Manual Snapshot', true);
     requestServiceWorkerDebugSnapshot();
+    syncAudioSessionSnapshot();
     updateStepResult('environment', {
       status: 'success',
       summary: 'Runtime snapshot requested. Check the debug log for the returned details.',
     });
-  }, [updateStepResult]);
+  }, [syncAudioSessionSnapshot, updateStepResult]);
 
   const handlePrimePlayback = useCallback(async () => {
     try {
@@ -453,7 +689,7 @@ export default function AudioLabPage() {
       );
       updateStepResult('audio-session', {
         status: 'success',
-        summary: `Requested ${nextType}. Watch the live state and then try the microphone and recording steps.`,
+        summary: `Requested ${nextType}. Now compare microphone and recording behavior under this mode.`,
       });
       syncAudioSessionSnapshot();
     },
@@ -523,6 +759,7 @@ export default function AudioLabPage() {
       return;
     }
 
+    setRecordingObservation(null);
     appendLabLog('Recording Started', `mode=${recordingMode}`);
     updateStepResult('recording', {
       status: 'success',
@@ -535,11 +772,11 @@ export default function AudioLabPage() {
       const audioBlob = await stopRecording();
       setLastRecordingBlob(audioBlob);
       const suspiciouslySmall = isSuspiciouslySmallRecordingBlob(audioBlob.size);
-      setRecordingSummary(
-        suspiciouslySmall
-          ? `Recording captured only ${audioBlob.size} bytes as ${audioBlob.type || 'unknown mime type'}. This looks like a tiny warm-up blob rather than a usable take.`
-          : `Recording captured ${audioBlob.size} bytes as ${audioBlob.type || 'unknown mime type'}.`,
-      );
+      const nextSummary = suspiciouslySmall
+        ? `Recording captured only ${audioBlob.size} bytes as ${audioBlob.type || 'unknown mime type'}. This looks like a tiny warm-up blob rather than a usable take.`
+        : `Recording captured ${audioBlob.size} bytes as ${audioBlob.type || 'unknown mime type'}.`;
+
+      setRecordingSummary(nextSummary);
       appendLabLog(
         'Recording Captured',
         `size=${audioBlob.size} | type=${audioBlob.type || 'unknown'}`,
@@ -548,9 +785,9 @@ export default function AudioLabPage() {
         status: suspiciouslySmall ? 'warning' : audioBlob.size > 0 ? 'success' : 'warning',
         summary:
           suspiciouslySmall
-            ? 'Recording produced a tiny blob. Try the same test again and compare the second take.'
+            ? 'Recording produced a tiny blob. Try the same test again and mark whether the second take becomes usable.'
             : audioBlob.size > 0
-            ? 'Recording completed with audio data.'
+            ? 'Recording completed with audio data. Mark whether the clip sounded usable.'
             : 'Recording stopped, but the blob was empty.',
       });
     } catch (error) {
@@ -580,54 +817,92 @@ export default function AudioLabPage() {
     }
   }, [appendLabLog, lastRecordingBlob]);
 
-  const handleArmMetadataOnlyProbe = useCallback(() => {
-    setProbeMode('metadata-only');
-    setMediaSessionMetadata('Audio Lab Control Probe', 'Metadata only');
-    setMediaSessionPlaybackState('playing');
-    appendLabLog('Media Control Probe Armed', 'mode=metadata-only');
-    updateStepResult('media-controls', {
-      status: 'warning',
-      summary: 'Metadata-only probe armed. Try your car controls and see if any events appear.',
-    });
-  }, [appendLabLog, updateStepResult]);
+  const handleRecordingObservation = useCallback(
+    (outcome: RecordingObservation) => {
+      setRecordingObservation(outcome);
+      const result = buildRecordingObservationResult(outcome, lastRecordingBlob, recordingSummary);
+      updateStepResult('recording', result);
+      appendLabLog(
+        'Recording Observation',
+        `tester=${outcome} | blob=${lastRecordingBlob?.size ?? 'none'} | mode=${recordingMode}`,
+      );
+    },
+    [appendLabLog, lastRecordingBlob, recordingMode, recordingSummary, updateStepResult],
+  );
 
-  const handleStartSilentProbe = useCallback(async () => {
-    try {
-      let audio = controlProbeAudioRef.current;
-      if (!audio) {
-        audio = new Audio();
-        audio.preload = 'auto';
-        audio.loop = true;
-        audio.setAttribute('playsinline', '');
-        audio.setAttribute('webkit-playsinline', '');
-        controlProbeAudioRef.current = audio;
+  const handleArmMetadataOnlyProbe = useCallback(
+    (stepKey: MediaCheckStepKey) => {
+      const probeAudio = controlProbeAudioRef.current;
+      if (probeAudio) {
+        probeAudio.pause();
+        probeAudio.currentTime = 0;
       }
 
-      audio.src = SILENT_CONTROL_PROBE_DATA_URI;
-      audio.load();
-      await audio.play();
-      setProbeMode('silent-loop');
-      setMediaSessionMetadata('Audio Lab Control Probe', 'Silent loop playing');
+      activeMediaStepRef.current = stepKey;
+      setMediaActionCounts(INITIAL_MEDIA_ACTION_COUNTS);
+      setProbeMode('metadata-only');
+      setMediaSessionMetadata('Audio Lab Control Probe', `${getWizardStepMeta(stepKey).title} | metadata only`);
       setMediaSessionPlaybackState('playing');
-      appendLabLog('Media Control Probe Armed', 'mode=silent-loop');
-      updateStepResult('media-controls', {
+      appendLabLog('Media Control Counts Reset', `step=${stepKey}`);
+      appendLabLog('Media Control Probe Armed', `step=${stepKey} | mode=metadata-only`);
+      updateStepResult(stepKey, {
         status: 'warning',
-        summary: 'Silent-loop probe armed. Try play, next, and previous on the car or headset.',
+        summary: 'Metadata-only probe armed. Try next/back now and then mark what happened.',
       });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Silent probe failed.';
-      appendLabLog('Media Control Probe Failed', message);
-      updateStepResult('media-controls', {
-        status: 'error',
-        summary: message,
-      });
-    }
-  }, [appendLabLog, updateStepResult]);
+    },
+    [appendLabLog, updateStepResult],
+  );
 
-  const handleResetMediaCounts = useCallback(() => {
-    setMediaActionCounts(INITIAL_MEDIA_ACTION_COUNTS);
-    appendLabLog('Media Control Counts Reset');
-  }, [appendLabLog]);
+  const handleStartSilentProbe = useCallback(
+    async (stepKey: MediaCheckStepKey) => {
+      try {
+        let audio = controlProbeAudioRef.current;
+        if (!audio) {
+          audio = new Audio();
+          audio.preload = 'auto';
+          audio.loop = true;
+          audio.setAttribute('playsinline', '');
+          audio.setAttribute('webkit-playsinline', '');
+          controlProbeAudioRef.current = audio;
+        }
+
+        audio.src = SILENT_CONTROL_PROBE_DATA_URI;
+        audio.load();
+        await audio.play();
+        activeMediaStepRef.current = stepKey;
+        setMediaActionCounts(INITIAL_MEDIA_ACTION_COUNTS);
+        setProbeMode('silent-loop');
+        setMediaSessionMetadata('Audio Lab Control Probe', `${getWizardStepMeta(stepKey).title} | silent loop`);
+        setMediaSessionPlaybackState('playing');
+        appendLabLog('Media Control Counts Reset', `step=${stepKey}`);
+        appendLabLog('Media Control Probe Armed', `step=${stepKey} | mode=silent-loop`);
+        updateStepResult(stepKey, {
+          status: 'warning',
+          summary: 'Silent-loop probe armed. Try next/back now and then mark what happened.',
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Silent probe failed.';
+        appendLabLog('Media Control Probe Failed', `step=${stepKey} | ${message}`);
+        updateStepResult(stepKey, {
+          status: 'error',
+          summary: message,
+        });
+      }
+    },
+    [appendLabLog, updateStepResult],
+  );
+
+  const handleMediaObservation = useCallback(
+    (stepKey: MediaCheckStepKey, outcome: MediaObservation) => {
+      const result = buildMediaObservationResult(outcome, mediaActionCounts, probeMode);
+      updateStepResult(stepKey, result);
+      appendLabLog(
+        'Media Control Observation',
+        `step=${stepKey} | outcome=${outcome} | probe=${probeMode} | ${formatMediaCountsSummary(mediaActionCounts)}`,
+      );
+    },
+    [appendLabLog, mediaActionCounts, probeMode, updateStepResult],
+  );
 
   const buildReport = useCallback((): AudioLabReport => {
     return {
@@ -680,13 +955,21 @@ export default function AudioLabPage() {
     try {
       await navigator.clipboard.writeText(reportText);
       appendLabLog('Audio Lab Report Copied');
+      updateStepResult('summary', {
+        status: 'success',
+        summary: 'Copied the full Audio Lab report to the clipboard.',
+      });
     } catch (error) {
       appendLabLog(
         'Audio Lab Report Copy Failed',
         error instanceof Error ? error.message : 'Clipboard write failed.',
       );
+      updateStepResult('summary', {
+        status: 'error',
+        summary: 'Clipboard write failed. Use one of the download buttons instead.',
+      });
     }
-  }, [appendLabLog, buildReport]);
+  }, [appendLabLog, buildReport, updateStepResult]);
 
   const handleDownloadTextReport = useCallback(() => {
     const report = buildReport();
@@ -696,7 +979,11 @@ export default function AudioLabPage() {
       'text/plain;charset=utf-8',
     );
     appendLabLog('Audio Lab Text Report Downloaded');
-  }, [appendLabLog, buildReport]);
+    updateStepResult('summary', {
+      status: 'success',
+      summary: 'Downloaded the text report successfully.',
+    });
+  }, [appendLabLog, buildReport, updateStepResult]);
 
   const handleDownloadJsonReport = useCallback(() => {
     const report = buildReport();
@@ -706,29 +993,404 @@ export default function AudioLabPage() {
       'application/json;charset=utf-8',
     );
     appendLabLog('Audio Lab JSON Report Downloaded');
-  }, [appendLabLog, buildReport]);
+    updateStepResult('summary', {
+      status: 'success',
+      summary: 'Downloaded the JSON report successfully.',
+    });
+  }, [appendLabLog, buildReport, updateStepResult]);
+
+  const summaryItems = useMemo(
+    () =>
+      AUDIO_LAB_WIZARD_STEPS.filter((step) => step.key !== 'summary').map((step) => ({
+        label: step.label,
+        title: step.title,
+        result: stepResults[step.key],
+      })),
+    [stepResults],
+  );
+
+  const renderMediaStep = (stepKey: MediaCheckStepKey) => {
+    const result = stepResults[stepKey];
+
+    return (
+      <div className="space-y-5">
+        <div className="rounded-3xl border border-border/60 bg-primary/5 p-4 text-sm text-muted-foreground">
+          Try one clean press on car `next` and one clean press on car `previous`. If nothing happens,
+          mark `Not Working Yet`. If several events fire from one press, mark `Repeated / Bursty`.
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Button
+            data-testid="button-audio-lab-metadata-probe"
+            onClick={() => handleArmMetadataOnlyProbe(stepKey)}
+          >
+            Metadata Only
+          </Button>
+          <Button
+            data-testid="button-audio-lab-silent-probe"
+            variant="outline"
+            onClick={() => void handleStartSilentProbe(stepKey)}
+          >
+            Silent Loop
+          </Button>
+          <Button variant="outline" onClick={stopControlProbe}>
+            Stop Probe
+          </Button>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Button
+            data-testid="button-audio-lab-media-worked"
+            variant="default"
+            onClick={() => handleMediaObservation(stepKey, 'worked')}
+          >
+            It Worked
+          </Button>
+          <Button
+            data-testid="button-audio-lab-media-not-working"
+            variant="outline"
+            onClick={() => handleMediaObservation(stepKey, 'not-working')}
+          >
+            Not Working Yet
+          </Button>
+          <Button
+            data-testid="button-audio-lab-media-bursty"
+            variant="secondary"
+            onClick={() => handleMediaObservation(stepKey, 'bursty')}
+          >
+            Repeated / Bursty
+          </Button>
+        </div>
+
+        <StepCountPanel counts={mediaActionCounts} probeMode={probeMode} />
+
+        <div className="rounded-3xl border border-border/60 bg-muted/30 p-4">
+          <p className="text-sm font-medium">Current step result</p>
+          <p className="mt-2 text-sm text-muted-foreground">{result.summary}</p>
+        </div>
+      </div>
+    );
+  };
+
+  const renderCurrentStepContent = () => {
+    switch (currentStep.key) {
+      case 'environment':
+        return (
+          <div className="space-y-5">
+            <div className="rounded-3xl border border-primary/20 bg-primary/5 p-5">
+              <div className="flex items-start gap-3">
+                <Smartphone className="mt-0.5 h-5 w-5 text-primary" />
+                <div className="space-y-2">
+                  <p className="font-medium">Why this step matters</p>
+                  <p className="text-sm text-muted-foreground">
+                    We want a clean baseline of runtime, service worker, and PWA state before we
+                    start changing audio session, microphone, or media-session behavior.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <Button
+              data-testid="button-audio-lab-capture-environment"
+              onClick={() => void handleCaptureEnvironment()}
+            >
+              Capture Snapshot
+            </Button>
+
+            <div className="rounded-3xl border border-border/60 bg-muted/30 p-4">
+              <p className="text-sm font-medium">Current step result</p>
+              <p className="mt-2 text-sm text-muted-foreground">{stepResults.environment.summary}</p>
+            </div>
+          </div>
+        );
+
+      case 'media-baseline':
+        return renderMediaStep('media-baseline');
+
+      case 'playback':
+        return (
+          <div className="space-y-5">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Button onClick={() => void handlePrimePlayback()}>Prime Playback</Button>
+              <Button variant="outline" onClick={() => void handlePlayCue()}>
+                Play Cue
+              </Button>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Button
+                variant={playbackObservation === 'heard' ? 'default' : 'outline'}
+                onClick={() => handlePlaybackObservation('heard')}
+              >
+                I Heard The Cue
+              </Button>
+              <Button
+                variant={playbackObservation === 'not-heard' ? 'destructive' : 'outline'}
+                onClick={() => handlePlaybackObservation('not-heard')}
+              >
+                I Did Not Hear It
+              </Button>
+            </div>
+
+            <div className="rounded-3xl border border-border/60 bg-muted/30 p-4">
+              <p className="text-sm font-medium">Current step result</p>
+              <p className="mt-2 text-sm text-muted-foreground">{stepResults.playback.summary}</p>
+            </div>
+          </div>
+        );
+
+      case 'media-after-playback':
+        return renderMediaStep('media-after-playback');
+
+      case 'audio-session':
+        return (
+          <div className="space-y-5">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <Button variant="outline" onClick={() => handleSetAudioSessionType('auto')}>
+                Set Auto
+              </Button>
+              <Button variant="outline" onClick={() => handleSetAudioSessionType('playback')}>
+                Set Playback
+              </Button>
+              <Button variant="outline" onClick={() => handleSetAudioSessionType('play-and-record')}>
+                Set Play And Record
+              </Button>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="rounded-3xl border border-border/60 bg-muted/30 p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                  Supported
+                </p>
+                <p className="mt-2 text-lg font-semibold">{audioSessionSupported ? 'Yes' : 'No'}</p>
+              </div>
+              <div className="rounded-3xl border border-border/60 bg-muted/30 p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                  Current Type
+                </p>
+                <p className="mt-2 text-lg font-semibold">{audioSessionType ?? 'unknown'}</p>
+              </div>
+              <div className="rounded-3xl border border-border/60 bg-muted/30 p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                  Current State
+                </p>
+                <p className="mt-2 text-lg font-semibold">{audioSessionState ?? 'unknown'}</p>
+              </div>
+            </div>
+
+            <div className="rounded-3xl border border-border/60 bg-muted/30 p-4">
+              <p className="text-sm font-medium">History</p>
+              <p className="mt-2 text-sm text-muted-foreground">
+                {audioSessionHistory.length > 0 ? audioSessionHistory.join(', ') : 'No audio-session changes yet.'}
+              </p>
+            </div>
+
+            <div className="rounded-3xl border border-border/60 bg-muted/30 p-4">
+              <p className="text-sm font-medium">Current step result</p>
+              <p className="mt-2 text-sm text-muted-foreground">
+                {stepResults['audio-session'].summary}
+              </p>
+            </div>
+          </div>
+        );
+
+      case 'microphone':
+        return (
+          <div className="space-y-5">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <Button onClick={() => void handleCheckMicrophone()}>Check Mic Once</Button>
+              <Button variant="outline" onClick={() => void handleWarmMicrophone()}>
+                Warm Car Mic
+              </Button>
+              <Button variant="outline" onClick={handleReleaseWarmMicrophone}>
+                Release Warm Mic
+              </Button>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-3xl border border-border/60 bg-muted/30 p-4">
+                <p className="text-sm font-medium">One-time permission</p>
+                <p className="mt-2 text-sm text-muted-foreground">{microphonePermissionSummary}</p>
+              </div>
+              <div className="rounded-3xl border border-border/60 bg-muted/30 p-4">
+                <p className="text-sm font-medium">Warm stream</p>
+                <p className="mt-2 text-sm text-muted-foreground">{warmStreamSummary}</p>
+              </div>
+            </div>
+
+            <div className="rounded-3xl border border-border/60 bg-muted/30 p-4">
+              <p className="text-sm font-medium">Current step result</p>
+              <p className="mt-2 text-sm text-muted-foreground">{stepResults.microphone.summary}</p>
+            </div>
+          </div>
+        );
+
+      case 'recording':
+        return (
+          <div className="space-y-5">
+            <div className="flex items-center justify-between gap-3 rounded-3xl border border-border/60 bg-muted/30 p-4">
+              <div>
+                <Label htmlFor="audio-lab-recording-mode">Use car-style recorder settings</Label>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Toggle this before recording if you want to compare normal capture against the
+                  car-style cleanup path.
+                </p>
+              </div>
+              <Switch
+                id="audio-lab-recording-mode"
+                checked={recordingMode === 'car'}
+                onCheckedChange={(checked) => {
+                  const nextMode = checked ? 'car' : 'normal';
+                  setRecordingMode(nextMode);
+                  appendLabLog('Recording Mode Changed', `mode=${nextMode}`);
+                }}
+              />
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <Button
+                data-testid="button-audio-lab-start-recording"
+                onClick={() => void handleStartRecording()}
+                disabled={isRecording}
+              >
+                Start Recording
+              </Button>
+              <Button
+                data-testid="button-audio-lab-stop-recording"
+                variant="outline"
+                onClick={() => void handleStopRecording()}
+                disabled={!isRecording}
+              >
+                Stop Recording
+              </Button>
+              <Button variant="outline" onClick={() => void handlePlayRecording()} disabled={!lastRecordingBlob}>
+                Play Clip
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  if (!lastRecordingBlob) {
+                    return;
+                  }
+
+                  downloadFile(getAudioUploadFilename(lastRecordingBlob), lastRecordingBlob);
+                  appendLabLog('Recorded Clip Downloaded');
+                }}
+                disabled={!lastRecordingBlob}
+              >
+                Download Clip
+              </Button>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Button
+                data-testid="button-audio-lab-recording-usable"
+                variant={recordingObservation === 'usable' ? 'default' : 'outline'}
+                onClick={() => handleRecordingObservation('usable')}
+                disabled={!lastRecordingBlob}
+              >
+                Recording Was Usable
+              </Button>
+              <Button
+                data-testid="button-audio-lab-recording-unusable"
+                variant={recordingObservation === 'not-usable' ? 'secondary' : 'outline'}
+                onClick={() => handleRecordingObservation('not-usable')}
+                disabled={!lastRecordingBlob}
+              >
+                Recording Was Bad
+              </Button>
+            </div>
+
+            <div className="rounded-3xl border border-border/60 bg-muted/30 p-4">
+              <p className="text-sm font-medium">Current step result</p>
+              <p className="mt-2 text-sm text-muted-foreground">{stepResults.recording.summary}</p>
+              <p className="mt-3 text-sm text-muted-foreground">{recordingSummary}</p>
+            </div>
+          </div>
+        );
+
+      case 'media-after-recording':
+        return renderMediaStep('media-after-recording');
+
+      case 'summary':
+        return (
+          <div className="space-y-5">
+            <div className="grid gap-3 sm:grid-cols-2">
+              {summaryItems.map((item) => (
+                <div key={item.label} className="rounded-3xl border border-border/60 bg-muted/30 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium">{item.title}</p>
+                      <p className="mt-1 text-xs uppercase tracking-[0.18em] text-muted-foreground">
+                        {item.label}
+                      </p>
+                    </div>
+                    <Badge variant={getStepBadgeVariant(item.result.status)}>{item.result.status}</Badge>
+                  </div>
+                  <p className="mt-3 text-sm text-muted-foreground">{item.result.summary}</p>
+                </div>
+              ))}
+            </div>
+
+            <Textarea
+              data-testid="textarea-audio-lab-notes"
+              value={testerNotes}
+              onChange={(event) => setTesterNotes(event.target.value)}
+              placeholder="Examples: controls only woke up after playback, metadata-only never worked until the silent loop ran, first recording blob was small but second one was fine..."
+              className="min-h-28"
+            />
+
+            <div className="grid gap-3 sm:grid-cols-3">
+              <Button variant="outline" onClick={() => void handleCopyReport()}>
+                <Copy className="h-4 w-4" />
+                Copy Report
+              </Button>
+              <Button variant="outline" onClick={handleDownloadTextReport}>
+                <Download className="h-4 w-4" />
+                Download Text
+              </Button>
+              <Button variant="outline" onClick={handleDownloadJsonReport}>
+                <Download className="h-4 w-4" />
+                Download JSON
+              </Button>
+            </div>
+
+            <div className="rounded-3xl border border-border/60 bg-muted/30 p-4">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <FileText className="h-4 w-4 text-primary" />
+                Live Debug Log
+              </div>
+              <pre
+                data-testid="audio-lab-log"
+                className="mt-3 max-h-64 overflow-auto rounded-2xl border border-border/60 bg-background/70 p-4 text-xs leading-6 text-muted-foreground"
+              >
+                {serializeDebugLogEntries(debugLogEntries)}
+              </pre>
+            </div>
+          </div>
+        );
+    }
+  };
 
   return (
-    <div data-testid="audio-lab-page" className="min-h-screen bg-background">
+    <div data-testid="audio-lab-page" className="flex min-h-screen flex-col overflow-hidden bg-background">
       <header className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/85">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
-          <div className="space-y-1">
+        <div className="mx-auto flex max-w-5xl items-center justify-between gap-4 px-4 py-4 sm:px-6 lg:px-8">
+          <div className="min-w-0">
             <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.25em] text-muted-foreground">
               <TestTube2 className="h-4 w-4 text-primary" />
               Audio Lab
             </div>
-            <h1 className="text-2xl font-semibold tracking-tight">iPhone PWA Audio Experiment</h1>
-            <p className="max-w-2xl text-sm text-muted-foreground">
-              Guided checks for playback, microphone capture, audio session changes, and car-control
-              media buttons. Export the final report and keep it with your device notes.
-            </p>
+            <h1 className="text-lg font-semibold tracking-tight sm:text-xl">
+              iPhone PWA Audio Test Wizard
+            </h1>
           </div>
 
           <div className="flex items-center gap-2">
             <Button asChild variant="outline" size="sm">
               <a href={buildAppRouteHref('rehearsal')}>
                 <ArrowLeft className="h-4 w-4" />
-                Back To Rehearsal
+                Back
               </a>
             </Button>
             <ThemeToggle />
@@ -736,371 +1398,89 @@ export default function AudioLabPage() {
         </div>
       </header>
 
-      <main className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8">
-        <Alert className="border-primary/30 bg-primary/5">
-          <Smartphone className="h-4 w-4" />
-          <AlertTitle>What this page is for</AlertTitle>
-          <AlertDescription>
-            This page is meant to discover what Safari standalone PWA mode actually allows on your
-            device. It does not depend on a server, and it focuses on hardware/media behavior rather
-            than full rehearsal flow.
-          </AlertDescription>
-        </Alert>
-
-        <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
-          <div className="space-y-6">
-            <Card>
-              <CardHeader className="pb-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <CardTitle className="flex items-center gap-2 text-xl">
-                      <Gauge className="h-5 w-5 text-primary" />
-                      1. Environment
-                    </CardTitle>
-                    <CardDescription>
-                      Capture the current runtime snapshot before touching playback or the microphone.
-                    </CardDescription>
-                  </div>
-                  <Badge variant={getStepBadgeVariant(stepResults.environment.status)}>
-                    {stepResults.environment.status}
-                  </Badge>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <p className="text-sm text-muted-foreground">{stepResults.environment.summary}</p>
-                <div className="flex flex-wrap gap-3">
-                  <Button data-testid="button-audio-lab-capture-environment" onClick={() => void handleCaptureEnvironment()}>
-                    Capture Snapshot
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="pb-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <CardTitle className="flex items-center gap-2 text-xl">
-                      <Ear className="h-5 w-5 text-primary" />
-                      2. Playback
-                    </CardTitle>
-                    <CardDescription>
-                      First unlock audio, then play the audible start cue and mark what you really heard.
-                    </CardDescription>
-                  </div>
-                  <Badge variant={getStepBadgeVariant(stepResults.playback.status)}>
-                    {stepResults.playback.status}
-                  </Badge>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <p className="text-sm text-muted-foreground">{stepResults.playback.summary}</p>
-                <div className="flex flex-wrap gap-3">
-                  <Button onClick={() => void handlePrimePlayback()}>Prime Playback</Button>
-                  <Button variant="outline" onClick={() => void handlePlayCue()}>
-                    Play Test Cue
-                  </Button>
-                </div>
-                <div className="flex flex-wrap items-center gap-3">
-                  <Button
-                    variant={playbackObservation === 'heard' ? 'default' : 'outline'}
-                    onClick={() => handlePlaybackObservation('heard')}
-                  >
-                    I Heard It
-                  </Button>
-                  <Button
-                    variant={playbackObservation === 'not-heard' ? 'destructive' : 'outline'}
-                    onClick={() => handlePlaybackObservation('not-heard')}
-                  >
-                    No Sound
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="pb-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <CardTitle className="flex items-center gap-2 text-xl">
-                      <AudioLines className="h-5 w-5 text-primary" />
-                      3. Audio Session
-                    </CardTitle>
-                    <CardDescription>
-                      Try the available `navigator.audioSession` modes and watch the live state.
-                    </CardDescription>
-                  </div>
-                  <Badge variant={getStepBadgeVariant(stepResults['audio-session'].status)}>
-                    {stepResults['audio-session'].status}
-                  </Badge>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <p className="text-sm text-muted-foreground">{stepResults['audio-session'].summary}</p>
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <Button variant="outline" onClick={() => handleSetAudioSessionType('auto')}>
-                    Set Auto
-                  </Button>
-                  <Button variant="outline" onClick={() => handleSetAudioSessionType('playback')}>
-                    Set Playback
-                  </Button>
-                  <Button variant="outline" onClick={() => handleSetAudioSessionType('play-and-record')}>
-                    Set Play And Record
-                  </Button>
-                </div>
-                <div className="grid gap-3 rounded-2xl border border-border/60 bg-muted/30 p-4 text-sm sm:grid-cols-3">
-                  <div>
-                    <p className="font-medium">Supported</p>
-                    <p className="text-muted-foreground">{audioSessionSupported ? 'Yes' : 'No'}</p>
-                  </div>
-                  <div>
-                    <p className="font-medium">Current type</p>
-                    <p className="text-muted-foreground">{audioSessionType ?? 'unknown'}</p>
-                  </div>
-                  <div>
-                    <p className="font-medium">Current state</p>
-                    <p className="text-muted-foreground">{audioSessionState ?? 'unknown'}</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="pb-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <CardTitle className="flex items-center gap-2 text-xl">
-                      <Mic className="h-5 w-5 text-primary" />
-                      4. Microphone
-                    </CardTitle>
-                    <CardDescription>
-                      Compare one-time permission with the persistent car-mode warm stream.
-                    </CardDescription>
-                  </div>
-                  <Badge variant={getStepBadgeVariant(stepResults.microphone.status)}>
-                    {stepResults.microphone.status}
-                  </Badge>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <p className="text-sm text-muted-foreground">{stepResults.microphone.summary}</p>
-                <div className="flex flex-wrap gap-3">
-                  <Button onClick={() => void handleCheckMicrophone()}>Check Mic Once</Button>
-                  <Button variant="outline" onClick={() => void handleWarmMicrophone()}>
-                    Warm Car Mic
-                  </Button>
-                  <Button variant="outline" onClick={handleReleaseWarmMicrophone}>
-                    Release Warm Mic
-                  </Button>
-                </div>
-                <div className="space-y-2 rounded-2xl border border-border/60 bg-muted/30 p-4 text-sm text-muted-foreground">
-                  <p>{microphonePermissionSummary}</p>
-                  <p>{warmStreamSummary}</p>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="pb-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <CardTitle className="flex items-center gap-2 text-xl">
-                      <ListRestart className="h-5 w-5 text-primary" />
-                      5. Recording
-                    </CardTitle>
-                    <CardDescription>
-                      Run a manual recording with the current session settings and inspect the resulting blob.
-                    </CardDescription>
-                  </div>
-                  <Badge variant={getStepBadgeVariant(stepResults.recording.status)}>
-                    {stepResults.recording.status}
-                  </Badge>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <p className="text-sm text-muted-foreground">{stepResults.recording.summary}</p>
-
-                <div className="flex items-center justify-between gap-3 rounded-2xl border border-border/60 bg-muted/30 p-4">
-                  <div>
-                    <Label htmlFor="audio-lab-recording-mode">Use car-style recorder settings</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Toggle this before starting the recording to compare normal and car-mode capture.
-                    </p>
-                  </div>
-                  <Switch
-                    id="audio-lab-recording-mode"
-                    checked={recordingMode === 'car'}
-                    onCheckedChange={(checked) => {
-                      setRecordingMode(checked ? 'car' : 'normal');
-                      appendLabLog('Recording Mode Changed', `mode=${checked ? 'car' : 'normal'}`);
-                    }}
-                  />
-                </div>
-
-                <div className="flex flex-wrap gap-3">
-                  <Button data-testid="button-audio-lab-start-recording" onClick={() => void handleStartRecording()} disabled={isRecording}>
-                    Start Recording
-                  </Button>
-                  <Button
-                    data-testid="button-audio-lab-stop-recording"
-                    variant="outline"
-                    onClick={() => void handleStopRecording()}
-                    disabled={!isRecording}
-                  >
-                    Stop Recording
-                  </Button>
-                  <Button variant="outline" onClick={() => void handlePlayRecording()} disabled={!lastRecordingBlob}>
-                    Play Recorded Clip
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      if (!lastRecordingBlob) {
-                        return;
-                      }
-
-                      downloadFile(getAudioUploadFilename(lastRecordingBlob), lastRecordingBlob);
-                      appendLabLog('Recorded Clip Downloaded');
-                    }}
-                    disabled={!lastRecordingBlob}
-                  >
-                    Download Recording
-                  </Button>
-                </div>
-
-                <div className="rounded-2xl border border-border/60 bg-muted/30 p-4 text-sm text-muted-foreground">
-                  {recordingSummary}
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="pb-4">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <CardTitle className="flex items-center gap-2 text-xl">
-                      <Music2 className="h-5 w-5 text-primary" />
-                      6. Media Controls
-                    </CardTitle>
-                    <CardDescription>
-                      Find out whether steering-wheel, headset, or lock-screen transport controls actually reach the page.
-                    </CardDescription>
-                  </div>
-                  <Badge variant={getStepBadgeVariant(stepResults['media-controls'].status)}>
-                    {stepResults['media-controls'].status}
-                  </Badge>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <p className="text-sm text-muted-foreground">{stepResults['media-controls'].summary}</p>
-                <div className="flex flex-wrap gap-3">
-                  <Button data-testid="button-audio-lab-metadata-probe" onClick={handleArmMetadataOnlyProbe}>
-                    Metadata Only Probe
-                  </Button>
-                  <Button data-testid="button-audio-lab-silent-probe" variant="outline" onClick={() => void handleStartSilentProbe()}>
-                    Start Silent Probe
-                  </Button>
-                  <Button variant="outline" onClick={stopControlProbe}>
-                    Stop Probe
-                  </Button>
-                  <Button variant="outline" onClick={handleResetMediaCounts}>
-                    Reset Counters
-                  </Button>
-                </div>
-
-                <div className="rounded-2xl border border-border/60 bg-muted/30 p-4">
-                  <p className="text-sm font-medium">
-                    Current probe: <span className="text-primary">{probeMode}</span>
-                  </p>
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    After arming the probe, try `play`, `pause`, `next`, and `previous` from the car,
-                    lock screen, headset, or control center. Any event that reaches the page increments below.
-                  </p>
-                </div>
-
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                  {MEDIA_ACTIONS.map((action) => (
-                    <div
-                      key={action}
-                      className="rounded-2xl border border-border/60 bg-muted/30 p-4"
-                    >
-                      <p className="text-sm font-medium">{formatActionLabel(action)}</p>
-                      <p className="mt-1 text-2xl font-semibold">{mediaActionCounts[action]}</p>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
+      <main className="mx-auto flex min-h-0 flex-1 max-w-5xl flex-col px-4 py-4 sm:px-6 lg:px-8">
+        <div className="mb-4 flex items-center justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-[0.25em] text-muted-foreground">
+              Step {currentStepIndex + 1} of {AUDIO_LAB_WIZARD_STEPS.length}
+            </p>
+            <h2 data-testid="audio-lab-step-title" className="mt-1 text-2xl font-semibold tracking-tight">
+              {currentStep.title}
+            </h2>
+            <p className="mt-1 max-w-3xl text-sm text-muted-foreground">{currentStep.description}</p>
           </div>
+          <Badge variant={getStepBadgeVariant(currentStepResult.status)}>{currentStepResult.status}</Badge>
+        </div>
 
-          <div className="space-y-6">
-            <Card>
-              <CardHeader className="pb-4">
-                <CardTitle className="flex items-center gap-2 text-xl">
-                  <FileText className="h-5 w-5 text-primary" />
-                  Notes And Export
-                </CardTitle>
-                <CardDescription>
-                  Add real-device notes here, then export a text or JSON report for development.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <Textarea
-                  data-testid="textarea-audio-lab-notes"
-                  value={testerNotes}
-                  onChange={(event) => setTesterNotes(event.target.value)}
-                  placeholder="Examples: nexttrack never fired in the car, cue was audible only through the receiver, recording worked in auto but failed in playback..."
-                  className="min-h-40"
-                />
-                <div className="flex flex-wrap gap-3">
-                  <Button variant="outline" onClick={() => void handleCopyReport()}>
-                    <Copy className="h-4 w-4" />
-                    Copy Report
-                  </Button>
-                  <Button variant="outline" onClick={handleDownloadTextReport}>
-                    <Download className="h-4 w-4" />
-                    Download Text
-                  </Button>
-                  <Button variant="outline" onClick={handleDownloadJsonReport}>
-                    <Download className="h-4 w-4" />
-                    Download JSON
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="pb-4">
-                <CardTitle className="text-xl">Live Debug Log</CardTitle>
-                <CardDescription>
-                  This combines Audio Lab actions with the existing PWA/service-worker debug events.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <pre
-                  data-testid="audio-lab-log"
-                  className="max-h-[40rem] overflow-auto rounded-2xl border border-border/60 bg-muted/30 p-4 text-xs leading-6 text-muted-foreground"
-                >
-                  {serializeDebugLogEntries(debugLogEntries)}
-                </pre>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="pb-4">
-                <CardTitle className="text-xl">How To Use It</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3 text-sm text-muted-foreground">
-                <p>1. Capture the environment first.</p>
-                <p>2. Prime playback and mark whether you heard the cue.</p>
-                <p>3. Try audio session modes before microphone and recording steps.</p>
-                <p>4. Run both microphone checks and at least one recording.</p>
-                <p>5. Arm the media probe and try hardware next/back/play controls.</p>
-                <p>6. Export the report and keep it with your phone/date/test notes.</p>
-              </CardContent>
-            </Card>
+        <div className="mb-4 overflow-x-auto">
+          <div className="flex min-w-max gap-2 pb-1">
+            {AUDIO_LAB_WIZARD_STEPS.map((step, index) => (
+              <Button
+                key={step.key}
+                data-testid={`button-audio-lab-step-${step.key}`}
+                variant={index === currentStepIndex ? 'default' : 'outline'}
+                size="sm"
+                className={cn('rounded-full', index === currentStepIndex && 'shadow-sm')}
+                onClick={() => goToStep(index)}
+              >
+                {step.label}
+              </Button>
+            ))}
           </div>
         </div>
+
+        <Card className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <CardHeader className="border-b pb-4">
+            <CardTitle className="flex items-center gap-2 text-xl">
+              {currentStep.key === 'environment' ? (
+                <Smartphone className="h-5 w-5 text-primary" />
+              ) : currentStep.key === 'playback' ? (
+                <Ear className="h-5 w-5 text-primary" />
+              ) : currentStep.key === 'audio-session' ? (
+                <AudioLines className="h-5 w-5 text-primary" />
+              ) : currentStep.key === 'microphone' ? (
+                <Mic className="h-5 w-5 text-primary" />
+              ) : currentStep.key === 'recording' ? (
+                <ListRestart className="h-5 w-5 text-primary" />
+              ) : currentStep.key === 'summary' ? (
+                <FileText className="h-5 w-5 text-primary" />
+              ) : (
+                <Music2 className="h-5 w-5 text-primary" />
+              )}
+              {currentStep.label}
+            </CardTitle>
+            <CardDescription>{currentStepResult.summary}</CardDescription>
+          </CardHeader>
+
+          <CardContent className="flex min-h-0 flex-1 flex-col gap-5 p-5">
+            <div className="min-h-0 flex-1 overflow-auto pr-1">{renderCurrentStepContent()}</div>
+
+            <div className="flex items-center justify-between gap-3 border-t pt-4">
+              <Button
+                data-testid="button-audio-lab-previous-step"
+                variant="outline"
+                onClick={() => goToStep(currentStepIndex - 1)}
+                disabled={isFirstStep}
+              >
+                <ChevronLeft className="h-4 w-4" />
+                Previous
+              </Button>
+
+              <p className="text-center text-xs text-muted-foreground">
+                This wizard is meant to answer the current open questions one phase at a time.
+              </p>
+
+              <Button
+                data-testid="button-audio-lab-next-step"
+                onClick={() => goToStep(currentStepIndex + 1)}
+                disabled={isLastStep}
+              >
+                Next
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       </main>
     </div>
   );
