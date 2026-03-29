@@ -72,6 +72,42 @@ test.describe('rehearsal browser e2e', () => {
     await expect(page.getByTestId('line-1')).toContainText('Recall your line...');
   });
 
+  test('can disable auto-played partner audio and still advance to the next cue', async ({
+    page,
+  }) => {
+    await setupRehearsalApp(page, {
+      autoPlayAudio: false,
+      script: PARTNER_LEAD_SCRIPT,
+      selectedCharacter: 'BOB',
+    });
+
+    await completeDeviceSetup(page);
+    const audioPlayCallsAfterSetup = await page.evaluate(
+      () =>
+        (
+          window as Window & {
+            __e2eAudioPlayCalls?: number;
+          }
+        ).__e2eAudioPlayCalls ?? 0,
+    );
+
+    await page.getByTestId('button-start-rehearsal').click();
+    await expect(page.getByTestId('line-1')).toContainText('Recall your line...');
+    await expect
+      .poll(
+        () =>
+          page.evaluate(
+            () =>
+              (
+                window as Window & {
+                  __e2eAudioPlayCalls?: number;
+                }
+              ).__e2eAudioPlayCalls ?? 0,
+          ),
+      )
+      .toBe(audioPlayCallsAfterSetup);
+  });
+
   test('records and scores a user line with mocked browser media and OpenAI responses', async ({
     page,
   }) => {

@@ -101,6 +101,7 @@ function isPlaybackPermissionError(error: unknown): boolean {
 interface PracticePreferences {
   selectedCharacter: string | null;
   carMode: boolean;
+  autoPlayAudio: boolean;
   autoSpeakCorrections: boolean;
 }
 
@@ -165,6 +166,7 @@ function loadPreferences(): PracticePreferences {
   const defaultPreferences: PracticePreferences = {
     selectedCharacter: null,
     carMode: false,
+    autoPlayAudio: true,
     autoSpeakCorrections: true,
   };
 
@@ -175,12 +177,13 @@ function loadPreferences(): PracticePreferences {
     }
 
     const parsedPreferences = JSON.parse(rawPreferences) as Partial<PracticePreferences>;
-    return {
-      selectedCharacter: parsedPreferences.selectedCharacter ?? defaultPreferences.selectedCharacter,
-      carMode: parsedPreferences.carMode ?? defaultPreferences.carMode,
-      autoSpeakCorrections:
-        parsedPreferences.autoSpeakCorrections ?? defaultPreferences.autoSpeakCorrections,
-    };
+      return {
+        selectedCharacter: parsedPreferences.selectedCharacter ?? defaultPreferences.selectedCharacter,
+        carMode: parsedPreferences.carMode ?? defaultPreferences.carMode,
+        autoPlayAudio: parsedPreferences.autoPlayAudio ?? defaultPreferences.autoPlayAudio,
+        autoSpeakCorrections:
+          parsedPreferences.autoSpeakCorrections ?? defaultPreferences.autoSpeakCorrections,
+      };
   } catch {
     return defaultPreferences;
   }
@@ -217,6 +220,9 @@ export default function RehearsalPage() {
   const [hasApiKey, setHasApiKey] = useState(!!getApiKey());
   const [selectedCharacter, setSelectedCharacter] = useState<string | null>(
     initialPreferences.current.selectedCharacter,
+  );
+  const [autoPlayAudio, setAutoPlayAudio] = useState(
+    initialPreferences.current.autoPlayAudio,
   );
   const [autoSpeakCorrections, setAutoSpeakCorrections] = useState(
     initialPreferences.current.autoSpeakCorrections,
@@ -475,10 +481,11 @@ export default function RehearsalPage() {
       JSON.stringify({
         selectedCharacter,
         carMode,
+        autoPlayAudio,
         autoSpeakCorrections,
       } satisfies PracticePreferences),
     );
-  }, [selectedCharacter, carMode, autoSpeakCorrections]);
+  }, [selectedCharacter, carMode, autoPlayAudio, autoSpeakCorrections]);
 
   useEffect(() => {
     const previousCarMode = lastSelectedModeRef.current;
@@ -872,29 +879,37 @@ export default function RehearsalPage() {
     }
 
     if (!line.isUserLine) {
-      updateRehearsalState('playing-tts');
       addDebugLog('Playing Partner Line', `Line ${lineIndex + 1} (${line.character})`);
       let shouldAdvanceAfterPlayback = true;
 
-      try {
-        const audioBlob = await textToSpeech(speakableText, {
-          voice: getVoiceForCharacter(line.character),
-        });
-        shouldAdvanceAfterPlayback = await playBlobWithRecovery({
-          kind: 'partner-line',
-          lineIndex,
-          audioBlob,
-        });
-      } catch (err) {
+      if (autoPlayAudio) {
+        updateRehearsalState('playing-tts');
+
+        try {
+          const audioBlob = await textToSpeech(speakableText, {
+            voice: getVoiceForCharacter(line.character),
+          });
+          shouldAdvanceAfterPlayback = await playBlobWithRecovery({
+            kind: 'partner-line',
+            lineIndex,
+            audioBlob,
+          });
+        } catch (err) {
+          addDebugLog(
+            'TTS Error',
+            err instanceof Error ? err.message : 'Failed to speak line',
+          );
+          toast({
+            variant: 'destructive',
+            title: 'TTS Error',
+            description: err instanceof Error ? err.message : 'Failed to speak line',
+          });
+        }
+      } else {
         addDebugLog(
-          'TTS Error',
-          err instanceof Error ? err.message : 'Failed to speak line',
+          'Partner Line Auto-Play Skipped',
+          `Line ${lineIndex + 1} (${line.character})`,
         );
-        toast({
-          variant: 'destructive',
-          title: 'TTS Error',
-          description: err instanceof Error ? err.message : 'Failed to speak line',
-        });
       }
 
       if (!shouldAdvanceAfterPlayback) {
@@ -921,7 +936,7 @@ export default function RehearsalPage() {
       addDebugLog('Waiting For User Line', `Line ${lineIndex + 1} (${line.character})`);
       updateRehearsalState('waiting-for-user');
     }
-  }, [addDebugLog, playBlobWithRecovery, toast, updateRehearsalState]);
+  }, [addDebugLog, autoPlayAudio, playBlobWithRecovery, toast, updateRehearsalState]);
 
   const handleStart = useCallback(async () => {
     if (isStartingRef.current) {
@@ -1892,6 +1907,7 @@ export default function RehearsalPage() {
         {shouldShowLaunchScreen && (
           <DeviceSetupScreen
             apiKeySection={<ApiKeyInput onKeyChange={setHasApiKey} />}
+            autoPlayAudio={autoPlayAudio}
             characterSection={
               <CharacterSelector
                 characters={characters}
@@ -1914,6 +1930,7 @@ export default function RehearsalPage() {
             microphoneMessage={microphoneSetupMessage}
             playbackStatus={playbackSetupStatus}
             playbackMessage={playbackSetupMessage}
+            onAutoPlayAudioChange={setAutoPlayAudio}
             onAutoSpeakCorrectionsChange={setAutoSpeakCorrections}
             onCarModeChange={setCarMode}
             onPrepare={() => {
@@ -1965,6 +1982,20 @@ export default function RehearsalPage() {
                       Close the current session to switch between normal mode and car mode.
                     </div>
                   )}
+
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="space-y-1">
+                      <Label htmlFor="auto-play-audio-settings">Auto-play spoken audio</Label>
+                      <p className="text-sm text-muted-foreground">
+                        Automatically plays partner lines and other spoken scene audio when the browser allows it.
+                      </p>
+                    </div>
+                    <Switch
+                      id="auto-play-audio-settings"
+                      checked={autoPlayAudio}
+                      onCheckedChange={setAutoPlayAudio}
+                    />
+                  </div>
 
                   <div className="flex items-start justify-between gap-3">
                     <div className="space-y-1">

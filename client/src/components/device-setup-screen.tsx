@@ -20,6 +20,7 @@ type DeviceSetupStatus = 'idle' | 'pending' | 'ready' | 'error';
 
 interface DeviceSetupScreenProps {
   apiKeySection: ReactNode;
+  autoPlayAudio: boolean;
   characterSection: ReactNode;
   autoSpeakCorrections: boolean;
   canStart: boolean;
@@ -31,6 +32,7 @@ interface DeviceSetupScreenProps {
   microphoneMessage?: string | null;
   playbackStatus: DeviceSetupStatus;
   playbackMessage?: string | null;
+  onAutoPlayAudioChange: (nextValue: boolean) => void;
   onAutoSpeakCorrectionsChange: (nextValue: boolean) => void;
   onCarModeChange: (nextValue: boolean) => void;
   onPrepare: () => void;
@@ -159,6 +161,7 @@ function ModeCard({ description, icon, isSelected, label, onSelect, testId }: Mo
 
 export function DeviceSetupScreen({
   apiKeySection,
+  autoPlayAudio,
   characterSection,
   autoSpeakCorrections,
   canStart,
@@ -170,6 +173,7 @@ export function DeviceSetupScreen({
   microphoneMessage,
   playbackStatus,
   playbackMessage,
+  onAutoPlayAudioChange,
   onAutoSpeakCorrectionsChange,
   onCarModeChange,
   onPrepare,
@@ -302,6 +306,22 @@ export function DeviceSetupScreen({
               <CardContent className="space-y-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="space-y-1">
+                    <Label htmlFor="auto-play-audio">Auto-play spoken audio</Label>
+                    <p className="text-sm text-muted-foreground">
+                      {carMode
+                        ? 'When enabled, partner lines and spoken scene audio start on their own when Safari and CarPlay allow it.'
+                        : 'Automatically plays partner lines and other spoken scene audio when the browser allows it.'}
+                    </p>
+                  </div>
+                  <Switch
+                    id="auto-play-audio"
+                    checked={autoPlayAudio}
+                    onCheckedChange={onAutoPlayAudioChange}
+                  />
+                </div>
+
+                <div className="flex items-start justify-between gap-3">
+                  <div className="space-y-1">
                     <Label htmlFor="spoken-corrections">Speak the correct line when I miss it</Label>
                     <p className="text-sm text-muted-foreground">
                       {carMode
@@ -319,7 +339,7 @@ export function DeviceSetupScreen({
                 <div className="rounded-2xl bg-muted/60 p-4 text-sm text-muted-foreground">
                   {carMode
                     ? 'In car mode, the rehearsal view becomes a single status-driven screen. Use steering-wheel, headset, or lock-screen track controls to move back or forward when supported.'
-                    : 'In normal mode, recording stays manual. Partner playback and correction playback can still run automatically when Safari allows it.'}
+                    : 'In normal mode, recording stays manual. Spoken corrections stay separate, so you can leave guidance on even if auto-played partner audio is off.'}
                 </div>
               </CardContent>
             </Card>

@@ -16,6 +16,7 @@ type MicrophoneMode = 'normal' | 'pending' | 'controlled';
 
 export interface RehearsalAppOptions {
   apiKey?: string;
+  autoPlayAudio?: boolean;
   autoSpeakCorrections?: boolean;
   carMode?: boolean;
   latestVersion?: string;
@@ -57,6 +58,7 @@ export async function setupRehearsalApp(
 ): Promise<void> {
   const {
     apiKey = 'sk-playwright-test-key',
+    autoPlayAudio = true,
     autoSpeakCorrections = true,
     carMode = false,
     latestVersion = '1.0.12',
@@ -73,6 +75,7 @@ export async function setupRehearsalApp(
   await page.addInitScript(
     ({
       apiKey: initApiKey,
+      autoPlayAudio: initAutoPlayAudio,
       autoSpeakCorrections: initAutoSpeakCorrections,
       carMode: initCarMode,
       mediaRecorderAutoStopDelayMs: initMediaRecorderAutoStopDelayMs,
@@ -88,6 +91,7 @@ export async function setupRehearsalApp(
         JSON.stringify({
           selectedCharacter: initSelectedCharacter,
           carMode: initCarMode,
+          autoPlayAudio: initAutoPlayAudio,
           autoSpeakCorrections: initAutoSpeakCorrections,
         }),
       );
@@ -364,6 +368,7 @@ export async function setupRehearsalApp(
     },
     {
       apiKey,
+      autoPlayAudio,
       autoSpeakCorrections,
       carMode,
       mediaRecorderAutoStopDelayMs,
