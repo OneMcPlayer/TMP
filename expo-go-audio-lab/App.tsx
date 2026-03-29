@@ -28,8 +28,9 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { CarPrototype } from './CarPrototype';
 
-const APP_VERSION = '1.1.3';
+const APP_VERSION = '1.1.5';
 const AUDIO_CUE = require('./assets/cue.wav');
 
 type ResultStatus = 'idle' | 'success' | 'warning' | 'error';
@@ -225,7 +226,33 @@ function outlineColor(status: ResultStatus): string {
   }
 }
 
-export default function App() {
+function safelyPausePlayer(player: { pause: () => void }) {
+  try {
+    player.pause();
+  } catch {
+    // Expo Go can invalidate the native shared object before React cleanup runs.
+  }
+}
+
+function safelyClearLockScreenControls(player: {
+  clearLockScreenControls?: () => void;
+}) {
+  if (typeof player.clearLockScreenControls !== 'function') {
+    return;
+  }
+
+  try {
+    player.clearLockScreenControls();
+  } catch {
+    // Ignore cleanup-time lock-screen errors in Expo Go.
+  }
+}
+
+function AudioLabApp({
+  onOpenPrototype,
+}: {
+  onOpenPrototype: () => void;
+}) {
   useKeepAwake();
 
   const cuePlayer = useAudioPlayer(AUDIO_CUE, {
@@ -580,10 +607,8 @@ export default function App() {
   }, [addLog, applyAudioMode, lockScreenPlayer, supportsLockScreenControls, updateStepResult]);
 
   const stopLockScreenPlayback = useCallback(() => {
-    lockScreenPlayer.pause();
-    if (typeof lockScreenPlayer.clearLockScreenControls === 'function') {
-      lockScreenPlayer.clearLockScreenControls();
-    }
+    safelyPausePlayer(lockScreenPlayer);
+    safelyClearLockScreenControls(lockScreenPlayer);
     addLog(
       'Lock Screen Playback Stopped',
       'Looping native playback was stopped and any available lock-screen controls were cleared.',
@@ -605,11 +630,9 @@ export default function App() {
       if (autoBeepTimeoutRef.current) {
         clearTimeout(autoBeepTimeoutRef.current);
       }
-      if (typeof lockScreenPlayer.clearLockScreenControls === 'function') {
-        lockScreenPlayer.clearLockScreenControls();
-      }
-      lockScreenPlayer.pause();
-      recordingBeepPlayer.pause();
+      safelyClearLockScreenControls(lockScreenPlayer);
+      safelyPausePlayer(lockScreenPlayer);
+      safelyPausePlayer(recordingBeepPlayer);
     };
   }, [addLog, lockScreenPlayer, recordingBeepPlayer]);
 
@@ -1017,8 +1040,13 @@ export default function App() {
             <Text style={styles.title}>Native Audio Test Wizard</Text>
             <Text style={styles.subtitle}>Version {APP_VERSION}</Text>
           </View>
-          <View style={styles.headerBadge}>
-            <Text style={styles.headerBadgeLabel}>Step {currentStepIndex + 1} of {STEP_ORDER.length}</Text>
+          <View style={styles.headerActions}>
+            <View style={styles.headerBadge}>
+              <Text style={styles.headerBadgeLabel}>Step {currentStepIndex + 1} of {STEP_ORDER.length}</Text>
+            </View>
+            <Pressable style={styles.headerSecondaryButton} onPress={onOpenPrototype}>
+              <Text style={styles.headerSecondaryButtonText}>Open Car Prototype</Text>
+            </Pressable>
           </View>
         </View>
 
@@ -1087,6 +1115,16 @@ export default function App() {
       </View>
     </SafeAreaView>
   );
+}
+
+export default function App() {
+  const [screen, setScreen] = useState<'lab' | 'prototype'>('lab');
+
+  if (screen === 'prototype') {
+    return <CarPrototype appVersion={APP_VERSION} onBack={() => setScreen('lab')} />;
+  }
+
+  return <AudioLabApp onOpenPrototype={() => setScreen('prototype')} />;
 }
 
 function InfoCard({
@@ -1193,6 +1231,10 @@ const styles = StyleSheet.create({
     flex: 1,
     gap: 4,
   },
+  headerActions: {
+    alignItems: 'flex-end',
+    gap: 10,
+  },
   eyebrow: {
     color: '#d85a2b',
     fontSize: 12,
@@ -1221,6 +1263,19 @@ const styles = StyleSheet.create({
     color: '#f3d2bf',
     fontSize: 13,
     fontWeight: '600',
+  },
+  headerSecondaryButton: {
+    backgroundColor: '#171311',
+    borderColor: 'rgba(255, 247, 239, 0.1)',
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  headerSecondaryButtonText: {
+    color: '#f3e5d8',
+    fontSize: 13,
+    fontWeight: '700',
   },
   card: {
     backgroundColor: '#211a15',

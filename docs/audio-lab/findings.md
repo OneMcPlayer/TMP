@@ -21,6 +21,10 @@
 - A later March 29, 2026 visual check showed that the standalone iPhone shell can still make the Audio Lab header feel cramped even when browser-based mobile tests pass, so phone-specific safe-area and shell chrome need to be treated as a separate concern from ordinary responsive layout.
 - A separate March 29, 2026 Expo Go native run on an iPhone 13 mini with iOS 18.7.2 produced a strong contrast with the PWA: native playback worked, cold recording worked, and playback-to-recording handoff also worked with usable recordings, which strongly suggests Safari/PWA is the main source of those failures rather than the product logic alone.
 - That same Expo Go run also showed `setActiveForLockScreen` was undefined in Expo Go 54.0.6 on-device, so lock-screen transport testing should currently be treated as unsupported in Expo Go even though native playback and recording themselves are promising.
+- A later March 29, 2026 Expo Go `1.1.3` run on the same iPhone also showed that the more automatic native flow worked: the app could auto-play a lead-in cue, switch into `play-and-record`, start recording, play a short start beep, and still capture a usable recording afterward.
+- That `1.1.3` native run produced usable recordings for every core path we tested: cold recording, playback-to-recording handoff, and the more automated cue-plus-beep flow.
+- Taken together, those native runs strongly suggest the biggest remaining blocker is no longer the general rehearsal logic. It is the Safari standalone PWA audio stack and its media-session / play-and-record behavior.
+- While testing the fuller Expo Go native prototype, teardown-time `pause()` calls could crash with `NativeSharedObjectNotFoundException`, which suggests Expo Go can invalidate audio-player shared objects before React cleanup finishes. Cleanup in the experiment now guards against that.
 
 ## Working assumptions
 
@@ -44,6 +48,8 @@
 - If we rerun the same playback and recording tests in Expo Go with native `expo-audio`, does the native stack remove the Safari-only autoplay and playback-to-recording failures enough to justify moving the fuller app off the PWA path?
 - If Expo Go already fixes the key playback and recording failures, is the next native experiment better framed as an EAS development build focused on lock-screen and transport-control behavior rather than more Expo Go wizard work?
 - If Expo Go playback and recording are already stable, does a more automatic native flow of cue playback followed by auto-start recording and a recording-start beep still remain usable in practice?
+- If the auto cue + auto record + beep native flow is already viable in Expo Go, how close can we get to a full rehearsal loop before needing a server-backed app or a development build?
+- Does the new native car-flow prototype remain usable across multiple lines, retries, and automatic correction playback, or does it need a thinner first version?
 
 ## How to use new evidence
 
