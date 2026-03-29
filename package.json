@@ -1,6 +1,6 @@
 {
   "name": "finale-di-partita-rehearsal-partner",
-  "version": "1.0.29",
+  "version": "1.0.30",
   "type": "module",
   "license": "MIT",
   "scripts": {
@@ -11,8 +11,10 @@
     "test": "tsx --test client/src/**/*.test.ts",
     "test:logic": "tsx --test client/src/**/*.e2e.ts",
     "test:e2e": "playwright test",
+    "test:e2e:ci": "playwright test --workers=2",
     "test:e2e:headed": "playwright test --headed",
-    "test:full": "npm run check && npm test && npm run test:logic && npm run test:e2e && npm run build"
+    "test:full": "npm run check && npm test && npm run test:logic && npm run test:e2e && npm run build",
+    "test:full:ci": "npm run check && npm test && npm run test:logic && npm run test:e2e:ci && npm run build"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

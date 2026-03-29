@@ -38,7 +38,7 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Run checks and tests
-        run: npm run test:full
+        run: npm run test:full:ci
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v4

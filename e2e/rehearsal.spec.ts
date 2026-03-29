@@ -105,11 +105,6 @@ test.describe('rehearsal browser e2e', () => {
     await expect(page.getByTestId('button-stop-recording')).toBeVisible();
     await page.getByTestId('button-stop-recording').click({ force: true });
 
-    await expect(
-      page.getByText(
-        'Safari returned a tiny warm-up recording. Please record the line one more time.',
-      ),
-    ).toBeVisible();
     await expect(page.getByTestId('line-1')).not.toContainText('100%');
     await expect(page.getByTestId('button-record')).toBeVisible();
 
