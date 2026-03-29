@@ -39,6 +39,7 @@
 - After the latest main-app arming change, do `Media Control Triggered` entries now appear in the regular rehearsal debug log during real CarPlay use?
 - Does the short cue at car-mode session start make the first next/back press work more reliably in the main app?
 - How often does the short cue itself time out after priming, and does that correlate with later media-control failures?
+- If we rerun the same playback and recording tests in Expo Go with native `expo-audio`, does the native stack remove the Safari-only autoplay and playback-to-recording failures enough to justify moving the fuller app off the PWA path?
 
 ## How to use new evidence
 

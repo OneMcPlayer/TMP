@@ -2,6 +2,8 @@
 
 This repo now doubles as an iPhone PWA audio experiment.
 
+It also now includes a separate Expo Go / React Native spike in [expo-go-audio-lab](/workspaces/TMP/expo-go-audio-lab) so we can compare Safari standalone behavior against a native audio stack without rewriting the full product yet.
+
 The goal is not just to keep patching rehearsal mode blindly. It is to learn, on real devices, what Safari standalone mode actually allows for:
 
 - playback priming
@@ -25,6 +27,16 @@ You can also open it directly with the hash route:
 - `#/audio-lab`
 
 The app uses a hash route on purpose so it still works under GitHub Pages and standalone PWA mode.
+
+## Native comparison app
+
+If the remaining failures look more like Safari limits than web-app bugs, use the separate Expo experiment:
+
+- [README.md](/workspaces/TMP/expo-go-audio-lab/README.md)
+
+That native wizard is meant to answer a narrower question:
+
+- does Expo Go native audio remove the worst playback and play-and-record failures enough to justify a native direction?
 
 ## What to test
 
