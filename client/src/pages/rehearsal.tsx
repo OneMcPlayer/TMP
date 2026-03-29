@@ -55,6 +55,7 @@ import { APP_VERSION, buildUpdateReloadUrl, fetchLatestVersion, isUpdateAvailabl
 import { isSlowPreparation, shouldOfferPreparationRecovery } from '@/lib/rehearsal-latency';
 import { prepareDeviceForRehearsal } from '@/lib/device-setup';
 import { cn } from '@/lib/utils';
+import { buildAppRouteHref } from '@/lib/app-route';
 import { AlertCircle, CarFront, Copy, Download, RefreshCw, Settings, Smartphone, Theater } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -1742,6 +1743,11 @@ export default function RehearsalPage() {
             carMode={carMode}
             isDeviceReady={hasCompletedDeviceSetup}
             isPreparing={isPreparingDevice}
+            labAction={
+              <Button asChild data-testid="button-open-audio-lab" variant="ghost">
+                <a href={buildAppRouteHref('audio-lab')}>Open Audio Lab</a>
+              </Button>
+            }
             microphoneStatus={microphoneSetupStatus}
             microphoneMessage={microphoneSetupMessage}
             playbackStatus={playbackSetupStatus}

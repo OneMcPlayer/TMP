@@ -26,6 +26,7 @@ interface DeviceSetupScreenProps {
   carMode: boolean;
   isDeviceReady: boolean;
   isPreparing: boolean;
+  labAction?: ReactNode;
   microphoneStatus: DeviceSetupStatus;
   microphoneMessage?: string | null;
   playbackStatus: DeviceSetupStatus;
@@ -164,6 +165,7 @@ export function DeviceSetupScreen({
   carMode,
   isDeviceReady,
   isPreparing,
+  labAction,
   microphoneStatus,
   microphoneMessage,
   playbackStatus,
@@ -278,6 +280,12 @@ export function DeviceSetupScreen({
                   ? 'Device check complete. You can begin immediately, or run the check again if you changed headphones, route, or permissions.'
                   : 'Run the device check first. The rehearsal start button stays locked until microphone and playback are ready.'}
               </div>
+
+              {labAction && (
+                <div className="flex justify-start">
+                  {labAction}
+                </div>
+              )}
             </CardContent>
           </Card>
 

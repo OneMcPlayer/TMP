@@ -9,6 +9,30 @@ import {
 } from './helpers/rehearsal-app';
 
 test.describe('rehearsal browser e2e', () => {
+  test('opens the audio lab from the launch screen and records media control events', async ({
+    page,
+  }) => {
+    await setupRehearsalApp(page, {
+      script: PARTNER_LEAD_SCRIPT,
+      selectedCharacter: 'BOB',
+    });
+
+    await page.getByTestId('button-open-audio-lab').click();
+    await expect(page.getByTestId('audio-lab-page')).toBeVisible();
+    await page.getByTestId('button-audio-lab-metadata-probe').click();
+
+    await page.evaluate(() => {
+      (
+        window as Window & {
+          __e2eMediaSessionHandlers?: Record<string, (() => void) | null>;
+        }
+      ).__e2eMediaSessionHandlers?.nexttrack?.();
+    });
+
+    await expect(page.getByTestId('audio-lab-log')).toContainText('action=nexttrack | count=1');
+    await expect(page.getByText('Current probe:')).toContainText('metadata-only');
+  });
+
   test('keeps the settings button available on the launch screen', async ({ page }) => {
     await setupRehearsalApp(page, {
       script: PARTNER_LEAD_SCRIPT,
