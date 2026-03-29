@@ -11,12 +11,15 @@
 - In that same CarPlay run, `play`, `pause`, and `stop` never fired, so next/back are the only controls we should currently trust.
 - The metadata-only media probe was enough to receive next/back events; a silent loop was not required just to expose those controls.
 - Real-device recording can still produce a tiny first blob before a second take succeeds, so first-take warm-up remains a real issue.
+- A later March 29, 2026 comparison suggested the main rehearsal car mode was not exposing itself to CarPlay the same way as the Audio Lab probe, even though the probe itself worked.
+- Because of that, the main app now keeps `mediaSession.playbackState = "playing"` while an active car-mode session is on screen and logs incoming media-control events directly in the rehearsal debug log.
 
 ## Working assumptions
 
 - The remaining failures are mostly platform-behavior questions, not simple application bugs.
 - We should prefer experiments that isolate one capability at a time over adding more complexity to the rehearsal flow.
 - Exportable test reports are more valuable right now than one more hidden heuristic.
+- When the lab and the main rehearsal app disagree, prefer trusting the lab result first and then make the main app imitate the lab’s successful session shape.
 
 ## Current open questions
 
@@ -25,6 +28,7 @@
 - Does a persistent warm microphone stream help in standalone mode, or does it only make routing more fragile?
 - Which audio session type produces the least harmful tradeoff between playback audibility and microphone capture?
 - Are failures different between standalone PWA, Safari tab, lock screen, and connected car audio routes?
+- After the latest main-app arming change, do `Media Control Triggered` entries now appear in the regular rehearsal debug log during real CarPlay use?
 
 ## How to use new evidence
 

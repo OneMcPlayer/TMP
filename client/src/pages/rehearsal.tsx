@@ -1583,6 +1583,8 @@ export default function RehearsalPage() {
   );
 
   const handleCarModePlayOrNext = useCallback(() => {
+    addDebugLog('Media Control Triggered', 'action=nexttrack');
+
     if (shouldIgnoreCarModeMediaControl('nexttrack')) {
       return;
     }
@@ -1599,15 +1601,17 @@ export default function RehearsalPage() {
     }
 
     handleNext();
-  }, [handleNext, handleStartRecording, shouldIgnoreCarModeMediaControl]);
+  }, [addDebugLog, handleNext, handleStartRecording, shouldIgnoreCarModeMediaControl]);
 
   const handleCarModePrevious = useCallback(() => {
+    addDebugLog('Media Control Triggered', 'action=previoustrack');
+
     if (shouldIgnoreCarModeMediaControl('previoustrack')) {
       return;
     }
 
     handlePrevious();
-  }, [handlePrevious, shouldIgnoreCarModeMediaControl]);
+  }, [addDebugLog, handlePrevious, shouldIgnoreCarModeMediaControl]);
 
   const handleCopyDebugLogs = useCallback(async () => {
     try {
@@ -1687,24 +1691,24 @@ export default function RehearsalPage() {
       });
     }
 
-    navigator.mediaSession.playbackState =
-      rehearsalState === 'playing-tts' || rehearsalState === 'playing-correction'
-        ? 'playing'
-        : 'paused';
+    navigator.mediaSession.playbackState = 'playing';
 
     setMediaSessionActionHandler('nexttrack', handleCarModePlayOrNext);
     setMediaSessionActionHandler('previoustrack', handleCarModePrevious);
     setMediaSessionActionHandler('play', () => {
+      addDebugLog('Media Control Triggered', 'action=play');
       if (rehearsalStateRef.current === 'waiting-for-user' && !isRecordingRef.current) {
         void handleStartRecording();
       }
     });
     setMediaSessionActionHandler('pause', () => {
+      addDebugLog('Media Control Triggered', 'action=pause');
       if (isRecordingRef.current) {
         void handleStopRecording();
       }
     });
     setMediaSessionActionHandler('stop', () => {
+      addDebugLog('Media Control Triggered', 'action=stop');
       if (isRecordingRef.current) {
         void handleStopRecording();
       }
@@ -1719,6 +1723,7 @@ export default function RehearsalPage() {
     };
   }, [
     carMode,
+    addDebugLog,
     currentLine,
     handleCarModePlayOrNext,
     handleStartRecording,
@@ -1726,7 +1731,6 @@ export default function RehearsalPage() {
     handleCarModePrevious,
     hasStarted,
     isComplete,
-    rehearsalState,
     script,
     selectedCharacter,
   ]);

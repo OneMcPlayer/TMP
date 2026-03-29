@@ -210,6 +210,21 @@ test.describe('rehearsal browser e2e', () => {
     await expect(page.getByTestId('car-mode-stage')).not.toContainText('First solo cue.');
     await expect(page.getByText('Use your car controls')).toBeVisible();
     await expect
+      .poll(
+        () =>
+          page.evaluate(
+            () =>
+              (
+                navigator as Navigator & {
+                  mediaSession?: {
+                    playbackState?: string;
+                  };
+                }
+              ).mediaSession?.playbackState ?? null,
+          ),
+      )
+      .toBe('playing');
+    await expect
       .poll(() =>
         page.evaluate(() =>
           Boolean(
