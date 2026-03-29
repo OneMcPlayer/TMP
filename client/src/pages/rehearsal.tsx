@@ -129,6 +129,38 @@ function setMediaSessionActionHandler(
   }
 }
 
+function setMediaSessionPlaybackState(nextState: MediaSessionPlaybackState): void {
+  try {
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.playbackState = nextState;
+    }
+  } catch {
+    // Some browsers expose mediaSession but reject playbackState writes.
+  }
+}
+
+function setMediaSessionMetadata({
+  album,
+  artist,
+  title,
+}: {
+  album: string;
+  artist: string;
+  title: string;
+}): void {
+  try {
+    if ('mediaSession' in navigator && 'MediaMetadata' in window) {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title,
+        artist,
+        album,
+      });
+    }
+  } catch {
+    // Some browsers expose mediaSession but not MediaMetadata.
+  }
+}
+
 function loadPreferences(): PracticePreferences {
   const defaultPreferences: PracticePreferences = {
     selectedCharacter: null,
@@ -925,6 +957,28 @@ export default function RehearsalPage() {
     try {
       lastCarModeMediaControlRef.current = { action: null, scope: null, timestamp: 0 };
 
+      if (carMode) {
+        setMediaSessionMetadata({
+          title: script.title,
+          artist: selectedCharacter ? `Practicing as ${selectedCharacter}` : 'Rehearsal Partner',
+          album: 'Car mode session start',
+        });
+        setMediaSessionPlaybackState('playing');
+        addDebugLog('Car Media Session Armed', 'Setting playbackState=playing before session start');
+
+        await playRecordingStartCue().then(
+          () => {
+            addDebugLog('Car Media Session Cue Played', 'Short cue played while starting car mode');
+          },
+          (error) => {
+            addDebugLog(
+              'Car Media Session Cue Error',
+              error instanceof Error ? error.message : 'Unable to play the car-mode arming cue',
+            );
+          },
+        );
+      }
+
       if (needsRehearsalLineInitialization(rehearsalLinesRef.current, script, selectedCharacter)) {
         const initializedLines = buildRehearsalLines(script, selectedCharacter);
         rehearsalLinesRef.current = initializedLines;
@@ -951,7 +1005,17 @@ export default function RehearsalPage() {
     } finally {
       isStartingRef.current = false;
     }
-  }, [addDebugLog, hasApiKey, processLine, rehearsalLinesRef, script, selectedCharacter, toast]);
+  }, [
+    addDebugLog,
+    carMode,
+    hasApiKey,
+    playRecordingStartCue,
+    processLine,
+    rehearsalLinesRef,
+    script,
+    selectedCharacter,
+    toast,
+  ]);
 
   const handlePrepareDevice = useCallback(async () => {
     if (isPreparingDevice) {
@@ -1008,6 +1072,15 @@ export default function RehearsalPage() {
       if (result.playbackReady && result.microphoneReady) {
         clearAudioRecovery();
         setHasCompletedDeviceSetup(true);
+        if (carMode) {
+          setMediaSessionMetadata({
+            title: script?.title ?? 'Rehearsal Partner',
+            artist: selectedCharacter ? `Practicing as ${selectedCharacter}` : 'Rehearsal Partner',
+            album: 'Car mode ready',
+          });
+          setMediaSessionPlaybackState('playing');
+          addDebugLog('Car Media Session Armed', 'Setting playbackState=playing after device setup');
+        }
         if (!carMode) {
           toast({
             title: 'Device Ready',
@@ -1024,7 +1097,16 @@ export default function RehearsalPage() {
     } finally {
       setIsPreparingDevice(false);
     }
-  }, [addDebugLog, carMode, clearAudioRecovery, isPreparingDevice, prepareRecordingSession, toast]);
+  }, [
+    addDebugLog,
+    carMode,
+    clearAudioRecovery,
+    isPreparingDevice,
+    prepareRecordingSession,
+    script?.title,
+    selectedCharacter,
+    toast,
+  ]);
 
   const handleReenableAudio = useCallback(async () => {
     if (isRecoveringAudio) {
@@ -1670,9 +1752,9 @@ export default function RehearsalPage() {
       return;
     }
 
-    if (!script || !carMode || !hasStarted || isComplete) {
+    if (!script || !carMode || isComplete) {
       navigator.mediaSession.metadata = null;
-      navigator.mediaSession.playbackState = 'none';
+      setMediaSessionPlaybackState('none');
       setMediaSessionActionHandler('nexttrack', null);
       setMediaSessionActionHandler('previoustrack', null);
       setMediaSessionActionHandler('play', null);
@@ -1681,17 +1763,16 @@ export default function RehearsalPage() {
       return;
     }
 
-    if ('MediaMetadata' in window) {
-      navigator.mediaSession.metadata = new MediaMetadata({
-        title: script.title,
-        artist: selectedCharacter ? `Practicing as ${selectedCharacter}` : 'Rehearsal Partner',
-        album: currentLine
+    setMediaSessionMetadata({
+      title: script.title,
+      artist: selectedCharacter ? `Practicing as ${selectedCharacter}` : 'Rehearsal Partner',
+      album:
+        hasStarted && currentLine
           ? `Line ${currentLine.index + 1}: ${currentLine.character}`
-          : 'Car mode rehearsal',
-      });
-    }
+          : 'Car mode rehearsal ready',
+    });
 
-    navigator.mediaSession.playbackState = 'playing';
+    setMediaSessionPlaybackState(hasCompletedDeviceSetup ? 'playing' : 'paused');
 
     setMediaSessionActionHandler('nexttrack', handleCarModePlayOrNext);
     setMediaSessionActionHandler('previoustrack', handleCarModePrevious);
@@ -1729,6 +1810,7 @@ export default function RehearsalPage() {
     handleStartRecording,
     handleStopRecording,
     handleCarModePrevious,
+    hasCompletedDeviceSetup,
     hasStarted,
     isComplete,
     script,

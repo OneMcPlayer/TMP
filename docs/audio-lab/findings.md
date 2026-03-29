@@ -13,6 +13,8 @@
 - Real-device recording can still produce a tiny first blob before a second take succeeds, so first-take warm-up remains a real issue.
 - A later March 29, 2026 comparison suggested the main rehearsal car mode was not exposing itself to CarPlay the same way as the Audio Lab probe, even though the probe itself worked.
 - Because of that, the main app now keeps `mediaSession.playbackState = "playing"` while an active car-mode session is on screen and logs incoming media-control events directly in the rehearsal debug log.
+- Another March 29, 2026 Audio Lab run suggested next/back events were easier to trigger only after other explicit interactions such as probe arming, playback, or recording steps, which points to session arming order as part of the problem.
+- The main car-mode flow now tries to imitate that pattern by arming the media session earlier and playing a short cue at session start.
 
 ## Working assumptions
 
@@ -29,6 +31,7 @@
 - Which audio session type produces the least harmful tradeoff between playback audibility and microphone capture?
 - Are failures different between standalone PWA, Safari tab, lock screen, and connected car audio routes?
 - After the latest main-app arming change, do `Media Control Triggered` entries now appear in the regular rehearsal debug log during real CarPlay use?
+- Does the short cue at car-mode session start make the first next/back press work more reliably in the main app?
 
 ## How to use new evidence
 
