@@ -5,7 +5,7 @@
   "lines": [
     {
       "speaker": "CLOV",
-      "line": "(sguardo fisso, voce bianca) Finita, è finita, sta per finire, sta forse per finire. (Pausa). I chicchi si aggiungono ai chicchi a uno a uno, e un giorno, all'improvviso, c'è il mucchio. (Pausa). Non possono più punirmi. (Pausa). Me ne vado nella mia cucina, tre metri per tre metri per tre metri, ad aspettare che mi faccia un fischio. Pausa. Hamm si muove. Sbadiglia sotto il fazzoletto. Si toglie il fazzoletto dalla faccia. Faccia molto rossa. Occhiali neri."
+      "line": "(sguardo fisso, voce bianca) Finita, è finita, sta per finire, sta forse per finire. (Pausa). I chicchi si aggiungono ai chicchi a uno a uno, e un giorno, all'improvviso, c'è il mucchio. (Pausa). Non possono più punirmi. (Pausa). Me ne vado nella mia cucina, tre metri per tre metri per tre metri, ad aspettare che mi faccia un fischio. (Pausa)."
     },
     {
       "speaker": "HAMM",
@@ -258,6 +258,54 @@
     {
       "speaker": "HAMM",
       "line": "Perché non mi ammazzi?"
+    },
+    {
+      "speaker": "CLOV",
+      "line": "Non conosco la combinazione della dispensa. (Pausa.)"
+    },
+    {
+      "speaker": "HAMM",
+      "line": "Vammi a prendere due ruote di bicicletta."
+    },
+    {
+      "speaker": "CLOV",
+      "line": "Non ci sono più ruote di bicicletta."
+    },
+    {
+      "speaker": "HAMM",
+      "line": "Che ne hai fatto della tua bicicletta?"
+    },
+    {
+      "speaker": "CLOV",
+      "line": "Non ho mai avuto una bicicletta."
+    },
+    {
+      "speaker": "HAMM",
+      "line": "E’ una cosa impossibile."
+    },
+    {
+      "speaker": "CLOV",
+      "line": "Quando c'erano ancora delle biciclette ho pianto per averne una. Mi sono trascinato ai tuoi piedi. Tu mi hai mandato al diavolo. Adesso non ce ne sono più."
+    },
+    {
+      "speaker": "HAMM",
+      "line": "E le tue commissioni? Quando andavi a visitare i miei poveri. Sempre a piedi?"
+    },
+    {
+      "speaker": "CLOV",
+      "line": "Qualche volta a cavallo. Ti lascio, ho da fare."
+    },
+    {
+      "speaker": "HAMM",
+      "line": "Nella tua cucina?"
+    },
+    {
+      "speaker": "CLOV",
+      "line": "Sì."
+    },
+    {
+      "speaker": "HAMM",
+      "line": "Fuori di qui è la morte. (Pausa). Va bene, vattene. (Clov esce. Pausa). E intanto si va avanti."
     }
   ]
 }
