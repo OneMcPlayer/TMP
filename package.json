@@ -1,12 +1,13 @@
 {
   "name": "finale-di-partita-rehearsal-partner",
-  "version": "1.1.6",
+  "version": "1.1.8",
   "type": "module",
   "license": "MIT",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "realtime-lab:server": "tsx experiments/realtime-webrtc-lab/server.ts",
     "check": "tsc",
     "test": "tsx --test client/src/**/*.test.ts",
     "test:logic": "tsx --test client/src/**/*.e2e.ts",

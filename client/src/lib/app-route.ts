@@ -1,6 +1,7 @@
-export type AppRoute = 'rehearsal' | 'audio-lab';
+export type AppRoute = 'rehearsal' | 'audio-lab' | 'realtime-lab';
 
 const AUDIO_LAB_HASHES = new Set(['#audio-lab', '#/audio-lab']);
+const REALTIME_LAB_HASHES = new Set(['#realtime-lab', '#/realtime-lab']);
 const REHEARSAL_HASHES = new Set(['', '#', '#/', '#rehearsal', '#/rehearsal']);
 
 export function getAppRouteFromHash(hash: string): AppRoute {
@@ -10,11 +11,23 @@ export function getAppRouteFromHash(hash: string): AppRoute {
     return 'audio-lab';
   }
 
+  if (REALTIME_LAB_HASHES.has(normalizedHash)) {
+    return 'realtime-lab';
+  }
+
   if (REHEARSAL_HASHES.has(normalizedHash)) {
     return 'rehearsal';
   }
 
-  return normalizedHash.includes('audio-lab') ? 'audio-lab' : 'rehearsal';
+  if (normalizedHash.includes('audio-lab')) {
+    return 'audio-lab';
+  }
+
+  if (normalizedHash.includes('realtime-lab')) {
+    return 'realtime-lab';
+  }
+
+  return 'rehearsal';
 }
 
 export function getCurrentAppRoute(): AppRoute {
@@ -26,5 +39,13 @@ export function getCurrentAppRoute(): AppRoute {
 }
 
 export function buildAppRouteHref(route: AppRoute): string {
-  return route === 'audio-lab' ? '#/audio-lab' : '#/';
+  if (route === 'audio-lab') {
+    return '#/audio-lab';
+  }
+
+  if (route === 'realtime-lab') {
+    return '#/realtime-lab';
+  }
+
+  return '#/';
 }

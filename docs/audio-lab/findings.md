@@ -25,6 +25,12 @@
 - That `1.1.3` native run produced usable recordings for every core path we tested: cold recording, playback-to-recording handoff, and the more automated cue-plus-beep flow.
 - Taken together, those native runs strongly suggest the biggest remaining blocker is no longer the general rehearsal logic. It is the Safari standalone PWA audio stack and its media-session / play-and-record behavior.
 - While testing the fuller Expo Go native prototype, teardown-time `pause()` calls could crash with `NativeSharedObjectNotFoundException`, which suggests Expo Go can invalidate audio-player shared objects before React cleanup finishes. Cleanup in the experiment now guards against that.
+- On April 14, 2026, the repo gained a separate browser-plus-backend Realtime WebRTC spike (`#/realtime-lab` plus `experiments/realtime-webrtc-lab/server.ts`) so we can test a true call-shaped architecture instead of repeating the older delayed playback chain.
+- On April 17, 2026, a real iPhone Safari browser-tab run of that Realtime WebRTC spike reached the strongest web result we have seen so far: the browser connected, ICE completed, the data channel opened, remote audio attached and played, server-side VAD detected speech, and the backend sideband log showed full response lifecycles.
+- That same April 17, 2026 run also exposed a concrete protocol bug in our experiment code rather than a platform blocker: both the browser client and backend sideband session were still sending `response.modalities`, and OpenAI Realtime returned `invalid_request_error: Unknown parameter: 'response.modalities'.`
+- Despite that invalid parameter error, the session still produced real assistant audio and transcript deltas after speech was detected, which strongly suggests the backend-assisted browser-call architecture is viable enough to keep pursuing.
+- The exported April 17, 2026 report came from Safari in browser-tab mode, not standalone PWA mode, and the page was not under an active service worker at the time. That means this result proves the architecture in ordinary mobile Safari first; standalone-PWA reliability still needs to be tested separately.
+- The same report also showed a later `Backend Log Poll Failed — Load failed` event after report export, which looks more like a transient fetch/polling issue during or after the session than a call-establishment failure.
 
 ## Working assumptions
 
@@ -50,6 +56,10 @@
 - If Expo Go playback and recording are already stable, does a more automatic native flow of cue playback followed by auto-start recording and a recording-start beep still remain usable in practice?
 - If the auto cue + auto record + beep native flow is already viable in Expo Go, how close can we get to a full rehearsal loop before needing a server-backed app or a development build?
 - Does the new native car-flow prototype remain usable across multiple lines, retries, and automatic correction playback, or does it need a thinner first version?
+- Does a backend-assisted browser WebRTC call on iPhone Safari keep remote audio and local microphone more reliably alive than the static PWA request / response architecture?
+- If that browser-call spike behaves better, is the next step a minimal server-backed rehearsal prototype rather than one more attempt to force the static PWA path into call-like behavior?
+- Once the obsolete `response.modalities` parameter is removed, does the same iPhone Safari browser-call flow remain stable without protocol errors across repeated prompts and longer conversations?
+- After the browser-tab success on April 17, 2026, how much of that same behavior survives when the exact same backend-assisted call flow is retried in standalone PWA mode?
 
 ## How to use new evidence
 

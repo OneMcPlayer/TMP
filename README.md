@@ -13,6 +13,7 @@ A browser-only rehearsal page for **Finale di partita** by Samuel Beckett. It is
 - Installable **PWA** shell for home-screen use
 - Car-mode **screen wake lock** when the browser supports it
 - Debug logs that capture **PWA**, **service worker**, and mobile runtime state
+- A separate **Realtime Browser Lab** route for testing a true browser-call architecture with a local backend
 
 ## Car Mode Note
 
@@ -44,6 +45,23 @@ Example:
 npm install
 npm run dev
 ```
+
+## Realtime Browser Experiment
+
+There is now a side experiment for testing whether a true browser `WebRTC` call behaves better on iPhone Safari than the older upload / STT / TTS chain.
+
+Browser page:
+
+- `#/realtime-lab`
+
+Local backend:
+
+```bash
+export OPENAI_API_KEY=sk-...
+npm run realtime-lab:server
+```
+
+The backend helper lives in [experiments/realtime-webrtc-lab/README.md](/workspaces/TMP/experiments/realtime-webrtc-lab/README.md). This experiment is intentionally separate from the static GitHub Pages deployment so we can test a backend-assisted call flow without destabilizing the main rehearsal app.
 
 ## Quality Checks
 

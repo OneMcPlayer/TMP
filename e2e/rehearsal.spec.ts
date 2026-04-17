@@ -41,6 +41,18 @@ test.describe('rehearsal browser e2e', () => {
     await expect(page.getByTestId('audio-lab-log')).toContainText('action=nexttrack | count=1');
   });
 
+  test('opens the realtime browser lab from the launch screen', async ({ page }) => {
+    await setupRehearsalApp(page, {
+      script: PARTNER_LEAD_SCRIPT,
+      selectedCharacter: 'BOB',
+    });
+
+    await page.getByTestId('button-open-realtime-lab').click();
+    await expect(page.getByTestId('realtime-call-lab-page')).toBeVisible();
+    await expect(page.getByText('WebRTC Call Spike')).toBeVisible();
+    await expect(page.getByTestId('button-realtime-start')).toBeVisible();
+  });
+
   test('keeps the settings button available on the launch screen', async ({ page }) => {
     await setupRehearsalApp(page, {
       script: PARTNER_LEAD_SCRIPT,

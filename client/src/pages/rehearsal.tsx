@@ -1922,9 +1922,14 @@ export default function RehearsalPage() {
             isDeviceReady={hasCompletedDeviceSetup}
             isPreparing={isPreparingDevice}
             labAction={
-              <Button asChild data-testid="button-open-audio-lab" variant="ghost">
-                <a href={buildAppRouteHref('audio-lab')}>Open Audio Lab</a>
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button asChild data-testid="button-open-audio-lab" variant="ghost">
+                  <a href={buildAppRouteHref('audio-lab')}>Open Audio Lab</a>
+                </Button>
+                <Button asChild data-testid="button-open-realtime-lab" variant="ghost">
+                  <a href={buildAppRouteHref('realtime-lab')}>Open Realtime Lab</a>
+                </Button>
+              </div>
             }
             microphoneStatus={microphoneSetupStatus}
             microphoneMessage={microphoneSetupMessage}
