@@ -1,52 +1,68 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ThemeToggle } from '@/components/theme-toggle';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { CharacterSelector } from '@/components/character-selector';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import { buildAppRouteHref } from '@/lib/app-route';
+import {
+  buildLiveMemorizationContinuePrompt,
+  buildLiveMemorizationGreetingPrompt,
+  buildLiveMemorizationInstructions,
+  buildLiveMemorizationPreviewLines,
+  buildLiveMemorizationRepeatPrompt,
+  buildLiveMemorizationRevealPrompt,
+  clampLiveMemorizationAttempts,
+  clampLiveMemorizationStartLine,
+  serializeLiveMemorizationReport,
+  type LiveMemorizationReport,
+  type LiveMemorizationOptions,
+} from '@/lib/live-memorization';
+import { normalizeScript } from '@/lib/script-utils';
 import { APP_VERSION } from '@/lib/version';
 import {
   appendDebugLogEntry,
   createDebugLogEntry,
-  serializeDebugLogEntries,
   type DebugLogEntry,
 } from '@/lib/debug-log';
 import {
-  capturePwaRuntimeDiagnostics,
   consumeQueuedPwaDebugLogs,
+  capturePwaRuntimeDiagnostics,
   requestServiceWorkerDebugSnapshot,
   subscribeToPwaDebugLogs,
 } from '@/lib/pwa-debug';
 import {
-  REALTIME_CALL_LAB_BACKEND_STORAGE_KEY,
   getRealtimeResponseLifecycleUpdate,
   normalizeRealtimeCallLabBackendUrl,
-  serializeRealtimeCallLabReport,
   summarizeRealtimeEvent,
-  type RealtimeCallLabReport,
+  REALTIME_CALL_LAB_BACKEND_STORAGE_KEY,
   type RealtimeServerLogEntry,
 } from '@/lib/realtime-call-lab';
+import type { RawScript, Script } from '@/lib/types';
 import {
   Activity,
+  AlertCircle,
   ArrowLeft,
   AudioLines,
   Copy,
   Download,
+  Loader2,
   Mic,
-  PhoneCall,
-  PhoneOff,
+  Radio,
   RefreshCw,
-  Send,
   Server,
+  SkipForward,
+  Sparkles,
   Wifi,
 } from 'lucide-react';
 
-type LabStatus =
+type SessionStatus =
   | 'idle'
   | 'checking-backend'
   | 'requesting-mic'
@@ -55,8 +71,6 @@ type LabStatus =
   | 'stopping'
   | 'stopped'
   | 'error';
-
-type TurnDetectionMode = 'disabled' | 'server_vad';
 
 interface BackendHealthSnapshot {
   checkedAt: string;
@@ -74,17 +88,15 @@ interface RealtimeCallResponse {
 }
 
 const DEFAULT_BACKEND_PLACEHOLDER = 'https://your-codespace-8787.your-forwarding-domain';
-const DEFAULT_INSTRUCTIONS =
-  'You are a concise voice rehearsal assistant. Keep replies short, natural, and easy to hear while driving.';
-const DEFAULT_GREETING_PROMPT =
-  'Say a short hello and confirm that the realtime browser call is connected.';
-const DEFAULT_RESPONSE_PROMPT =
-  'Say one short line confirming that the audio pipeline is still alive.';
+const DEFAULT_MAX_ATTEMPTS = 3;
 const DEFAULT_VOICE = 'alloy';
-const ICE_GATHERING_TIMEOUT_MS = 1500;
 const BACKEND_LOG_POLL_INTERVAL_MS = 1500;
+const ICE_GATHERING_TIMEOUT_MS = 1500;
+const REHEARSAL_PREFERENCES_STORAGE_KEY = 'rehearsal_preferences';
 
-function getStatusVariant(status: LabStatus): 'default' | 'secondary' | 'destructive' | 'outline' {
+function getStatusVariant(
+  status: SessionStatus,
+): 'default' | 'secondary' | 'destructive' | 'outline' {
   switch (status) {
     case 'connected':
       return 'default';
@@ -137,7 +149,7 @@ async function readResponseErrorMessage(response: Response): Promise<string> {
       return payload.message;
     }
   } catch {
-    // Some responses are plain-text SDP or non-JSON server errors.
+    // Non-JSON responses are returned as raw text.
   }
 
   return responseText;
@@ -183,7 +195,49 @@ async function waitForIceGatheringComplete(
   });
 }
 
-export default function RealtimeCallLabPage() {
+function loadPreferredCharacter(): string | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  try {
+    const rawPreferences = localStorage.getItem(REHEARSAL_PREFERENCES_STORAGE_KEY);
+    if (!rawPreferences) {
+      return null;
+    }
+
+    const parsedPreferences = JSON.parse(rawPreferences) as { selectedCharacter?: unknown };
+    return typeof parsedPreferences.selectedCharacter === 'string'
+      ? parsedPreferences.selectedCharacter
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function persistPreferredCharacter(selectedCharacter: string | null): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    const rawPreferences = localStorage.getItem(REHEARSAL_PREFERENCES_STORAGE_KEY);
+    const parsedPreferences =
+      rawPreferences ? (JSON.parse(rawPreferences) as Record<string, unknown>) : {};
+
+    localStorage.setItem(
+      REHEARSAL_PREFERENCES_STORAGE_KEY,
+      JSON.stringify({
+        ...parsedPreferences,
+        selectedCharacter,
+      }),
+    );
+  } catch {
+    // Preference persistence is best-effort only.
+  }
+}
+
+export default function LiveMemorizationPage() {
   const { toast } = useToast();
   const [backendUrlInput, setBackendUrlInput] = useState(() => {
     if (typeof window === 'undefined') {
@@ -192,21 +246,27 @@ export default function RealtimeCallLabPage() {
 
     return localStorage.getItem(REALTIME_CALL_LAB_BACKEND_STORAGE_KEY) ?? '';
   });
-  const [instructions, setInstructions] = useState(DEFAULT_INSTRUCTIONS);
-  const [greetingPrompt, setGreetingPrompt] = useState(DEFAULT_GREETING_PROMPT);
-  const [responsePrompt, setResponsePrompt] = useState(DEFAULT_RESPONSE_PROMPT);
-  const [voice, setVoice] = useState(DEFAULT_VOICE);
-  const [turnDetection, setTurnDetection] = useState<TurnDetectionMode>('server_vad');
-  const [status, setStatus] = useState<LabStatus>('idle');
+  const [script, setScript] = useState<Script | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [selectedCharacter, setSelectedCharacter] = useState<string | null>(() =>
+    loadPreferredCharacter(),
+  );
+  const [startLineNumber, setStartLineNumber] = useState(1);
+  const [maxAttemptsPerLine, setMaxAttemptsPerLine] = useState(DEFAULT_MAX_ATTEMPTS);
+  const [status, setStatus] = useState<SessionStatus>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [backendHealth, setBackendHealth] = useState<BackendHealthSnapshot | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [callId, setCallId] = useState<string | null>(null);
   const [connectionState, setConnectionState] = useState<RTCPeerConnectionState | 'closed'>('closed');
-  const [iceConnectionState, setIceConnectionState] = useState<RTCIceConnectionState | 'closed'>('closed');
+  const [iceConnectionState, setIceConnectionState] = useState<RTCIceConnectionState | 'closed'>(
+    'closed',
+  );
   const [iceGatheringState, setIceGatheringState] = useState<RTCIceGatheringState>('new');
   const [signalingState, setSignalingState] = useState<RTCSignalingState | 'closed'>('closed');
-  const [dataChannelState, setDataChannelState] = useState<RTCDataChannelState | 'closed'>('closed');
+  const [dataChannelState, setDataChannelState] = useState<RTCDataChannelState | 'closed'>(
+    'closed',
+  );
   const [remoteAudioAttached, setRemoteAudioAttached] = useState(false);
   const [remoteAudioPlaying, setRemoteAudioPlaying] = useState(false);
   const [activeResponseId, setActiveResponseId] = useState<string | null>(null);
@@ -232,10 +292,46 @@ export default function RealtimeCallLabPage() {
     [backendUrlInput],
   );
 
+  const characters = useMemo(
+    () => (script ? Array.from(new Set(script.lines.map((line) => line.character))) : []),
+    [script],
+  );
+  const clampedStartLineNumber = useMemo(
+    () => clampLiveMemorizationStartLine(startLineNumber, script?.lines.length ?? 0),
+    [script?.lines.length, startLineNumber],
+  );
+  const clampedMaxAttemptsPerLine = useMemo(
+    () => clampLiveMemorizationAttempts(maxAttemptsPerLine),
+    [maxAttemptsPerLine],
+  );
+  const memorizationOptions = useMemo<LiveMemorizationOptions | null>(() => {
+    if (!script || !selectedCharacter) {
+      return null;
+    }
+
+    return {
+      maxAttemptsPerLine: clampedMaxAttemptsPerLine,
+      script,
+      selectedCharacter,
+      startLineNumber: clampedStartLineNumber,
+    };
+  }, [clampedMaxAttemptsPerLine, clampedStartLineNumber, script, selectedCharacter]);
+  const generatedInstructions = useMemo(
+    () => (memorizationOptions ? buildLiveMemorizationInstructions(memorizationOptions) : ''),
+    [memorizationOptions],
+  );
+  const generatedGreetingPrompt = useMemo(
+    () => (memorizationOptions ? buildLiveMemorizationGreetingPrompt(memorizationOptions) : ''),
+    [memorizationOptions],
+  );
+  const previewLines = useMemo(
+    () => (memorizationOptions ? buildLiveMemorizationPreviewLines(memorizationOptions, 14) : []),
+    [memorizationOptions],
+  );
+  const canStartSession = Boolean(memorizationOptions && normalizedBackendUrl);
+
   const addLocalLog = useCallback((event: string, details?: string) => {
-    setLocalLogs((entries) =>
-      appendDebugLogEntry(entries, createDebugLogEntry(event, details)),
-    );
+    setLocalLogs((entries) => appendDebugLogEntry(entries, createDebugLogEntry(event, details)));
   }, []);
 
   useEffect(() => {
@@ -276,7 +372,9 @@ export default function RealtimeCallLabPage() {
 
     try {
       const response = await fetch(
-        `${activeBackendBaseUrl}/api/realtime-webrtc/sessions/${encodeURIComponent(activeSessionId)}/logs?after=${lastServerSeqRef.current}`,
+        `${activeBackendBaseUrl}/api/realtime-webrtc/sessions/${encodeURIComponent(
+          activeSessionId,
+        )}/logs?after=${lastServerSeqRef.current}`,
       );
 
       if (!response.ok) {
@@ -298,7 +396,9 @@ export default function RealtimeCallLabPage() {
 
       if (payload.status === 'error' && status === 'connected') {
         setStatus('error');
-        setErrorMessage('The backend session reported an error. Export the report for details.');
+        setErrorMessage(
+          'The backend session reported an error. Export the memorization report for details.',
+        );
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown backend polling error';
@@ -330,7 +430,9 @@ export default function RealtimeCallLabPage() {
       if (options?.notifyBackend && activeBackendBaseUrl && activeSessionId) {
         try {
           const response = await fetch(
-            `${activeBackendBaseUrl}/api/realtime-webrtc/sessions/${encodeURIComponent(activeSessionId)}/end`,
+            `${activeBackendBaseUrl}/api/realtime-webrtc/sessions/${encodeURIComponent(
+              activeSessionId,
+            )}/end`,
             { method: 'POST' },
           );
 
@@ -406,32 +508,6 @@ export default function RealtimeCallLabPage() {
     [addLocalLog, clearServerLogPolling, syncPeerConnectionSnapshot],
   );
 
-  const handleStopSession = useCallback(async () => {
-    if (!peerConnectionRef.current && !sessionIdRef.current) {
-      setStatus('stopped');
-      return;
-    }
-
-    setStatus('stopping');
-    setErrorMessage(null);
-    addLocalLog('Session Stop Requested');
-
-    await cleanupActiveSession({ notifyBackend: true });
-
-    setStatus('stopped');
-    addLocalLog('Session Stopped');
-    toast({
-      title: 'Realtime session stopped',
-      description: 'The browser call experiment has been cleaned up.',
-    });
-  }, [addLocalLog, cleanupActiveSession, toast]);
-
-  const captureManualSnapshot = useCallback(async () => {
-    await capturePwaRuntimeDiagnostics(APP_VERSION, 'Realtime Lab Manual Snapshot', true);
-    await requestServiceWorkerDebugSnapshot();
-    addLocalLog('Realtime Lab Snapshot Requested');
-  }, [addLocalLog]);
-
   const checkBackendHealth = useCallback(async () => {
     if (!normalizedBackendUrl) {
       const message = 'Enter a valid HTTP(S) backend URL before checking health.';
@@ -474,9 +550,10 @@ export default function RealtimeCallLabPage() {
       setBackendHealth(snapshot);
       addLocalLog(
         'Backend Health Check Succeeded',
-        `ok=${snapshot.ok ? 'yes' : 'no'} | openai=${snapshot.openAiConfigured ? 'yes' : 'no'} | uptime=${snapshot.uptimeSeconds}s`,
+        `ok=${snapshot.ok ? 'yes' : 'no'} | openai=${
+          snapshot.openAiConfigured ? 'yes' : 'no'
+        } | uptime=${snapshot.uptimeSeconds}s`,
       );
-
       setStatus((currentStatus) =>
         currentStatus === 'checking-backend' ? 'idle' : currentStatus,
       );
@@ -493,62 +570,60 @@ export default function RealtimeCallLabPage() {
     }
   }, [addLocalLog, normalizedBackendUrl, toast]);
 
-  const handleSendPrompt = useCallback(() => {
-    const dataChannel = dataChannelRef.current;
-    const prompt = responsePrompt.trim();
+  const sendControlPrompt = useCallback(
+    (prompt: string, buttonLabel: string, successDescription: string) => {
+      const dataChannel = dataChannelRef.current;
+      const trimmedPrompt = prompt.trim();
 
-    if (!prompt) {
+      if (!trimmedPrompt) {
+        return;
+      }
+
+      if (!dataChannel || dataChannel.readyState !== 'open') {
+        toast({
+          title: 'Session not ready',
+          description: 'Start the live memorization session first.',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      if (activeResponseIdRef.current) {
+        const message = 'Wait for the current spoken response to finish before sending another cue.';
+        addLocalLog('Control Prompt Blocked', `${buttonLabel} | active=${activeResponseIdRef.current}`);
+        toast({
+          title: 'Assistant is still speaking',
+          description: message,
+        });
+        return;
+      }
+
+      dataChannel.send(
+        JSON.stringify({
+          type: 'response.create',
+          response: {
+            output_modalities: ['audio'],
+            instructions: trimmedPrompt,
+          },
+        }),
+      );
+
+      addLocalLog('Control Prompt Sent', `${buttonLabel} | ${trimmedPrompt}`);
       toast({
-        title: 'Prompt needed',
-        description: 'Enter a short manual prompt before sending it to the realtime session.',
-        variant: 'destructive',
+        title: buttonLabel,
+        description: successDescription,
       });
-      return;
-    }
-
-    if (!dataChannel || dataChannel.readyState !== 'open') {
-      toast({
-        title: 'Data channel not ready',
-        description: 'Start the realtime session and wait for the data channel to open first.',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    if (activeResponseIdRef.current) {
-      const message = 'Wait for the current spoken response to finish before sending another prompt.';
-      addLocalLog('Realtime Prompt Blocked', `active=${activeResponseIdRef.current} | ${prompt}`);
-      toast({
-        title: 'Assistant is still speaking',
-        description: message,
-      });
-      return;
-    }
-
-    dataChannel.send(
-      JSON.stringify({
-        type: 'response.create',
-        response: {
-          output_modalities: ['audio'],
-          instructions: prompt,
-        },
-      }),
-    );
-
-    addLocalLog('Realtime Prompt Sent', prompt);
-    toast({
-      title: 'Prompt sent',
-      description: 'The client data channel asked the model to speak again.',
-    });
-  }, [addLocalLog, responsePrompt, toast]);
+    },
+    [addLocalLog, toast],
+  );
 
   const handleStartSession = useCallback(async () => {
     if (isStartingSessionRef.current) {
       return;
     }
 
-    if (!normalizedBackendUrl) {
-      const message = 'Enter a valid backend URL before starting the realtime test.';
+    if (!normalizedBackendUrl || !memorizationOptions) {
+      const message = 'Choose your character and backend before starting live memorization.';
       setStatus('error');
       setErrorMessage(message);
       addLocalLog('Session Start Blocked', message);
@@ -579,13 +654,13 @@ export default function RealtimeCallLabPage() {
     lastServerSeqRef.current = 0;
     lastBackendPollErrorRef.current = null;
     addLocalLog(
-      'Realtime Session Start Requested',
-      `backend=${normalizedBackendUrl} | turnDetection=${turnDetection} | voice=${voice.trim() || DEFAULT_VOICE}`,
+      'Memorization Session Start Requested',
+      `backend=${normalizedBackendUrl} | line=${memorizationOptions.startLineNumber} | attempts=${memorizationOptions.maxAttemptsPerLine}`,
     );
 
     try {
       await cleanupActiveSession({ notifyBackend: true });
-      await capturePwaRuntimeDiagnostics(APP_VERSION, 'Realtime Lab Start Snapshot', true);
+      await capturePwaRuntimeDiagnostics(APP_VERSION, 'Live Memorization Start Snapshot', true);
       await requestServiceWorkerDebugSnapshot();
 
       setStatus('requesting-mic');
@@ -724,11 +799,11 @@ export default function RealtimeCallLabPage() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          greetingPrompt,
-          instructions,
+          greetingPrompt: generatedGreetingPrompt,
+          instructions: generatedInstructions,
           offerSdp: peerConnection.localDescription?.sdp ?? offer.sdp ?? '',
-          turnDetection,
-          voice: voice.trim() || DEFAULT_VOICE,
+          turnDetection: 'server_vad',
+          voice: DEFAULT_VOICE,
         }),
       });
 
@@ -742,7 +817,7 @@ export default function RealtimeCallLabPage() {
       setSessionId(payload.sessionId);
       setCallId(payload.callId);
       addLocalLog(
-        'Realtime Call Created',
+        'Live Memorization Call Created',
         `session=${payload.sessionId} | call=${payload.callId ?? 'none'} | model=${payload.model}`,
       );
 
@@ -755,17 +830,17 @@ export default function RealtimeCallLabPage() {
       startServerLogPolling();
       setStatus('connected');
       toast({
-        title: 'Realtime session connected',
-        description: 'The browser call experiment is live. Watch the state cards and logs below.',
+        title: 'Live memorization connected',
+        description: 'The voice rehearsal is live. Speak naturally and let the script drive.',
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown realtime-session error';
       setStatus('error');
       setErrorMessage(message);
-      addLocalLog('Realtime Session Failed', message);
+      addLocalLog('Live Memorization Failed', message);
       await cleanupActiveSession({ notifyBackend: true });
       toast({
-        title: 'Realtime session failed',
+        title: 'Live memorization failed',
         description: message,
         variant: 'destructive',
       });
@@ -775,21 +850,41 @@ export default function RealtimeCallLabPage() {
   }, [
     addLocalLog,
     cleanupActiveSession,
-    greetingPrompt,
-    instructions,
+    generatedGreetingPrompt,
+    generatedInstructions,
+    memorizationOptions,
     normalizedBackendUrl,
     startServerLogPolling,
     syncPeerConnectionSnapshot,
     toast,
-    turnDetection,
-    voice,
   ]);
 
+  const handleStopSession = useCallback(async () => {
+    if (!peerConnectionRef.current && !sessionIdRef.current) {
+      setStatus('stopped');
+      return;
+    }
+
+    setStatus('stopping');
+    setErrorMessage(null);
+    addLocalLog('Session Stop Requested');
+    await cleanupActiveSession({ notifyBackend: true });
+    setStatus('stopped');
+    addLocalLog('Session Stopped');
+    toast({
+      title: 'Live memorization stopped',
+      description: 'The browser call and script coach were cleaned up.',
+    });
+  }, [addLocalLog, cleanupActiveSession, toast]);
+
   const handleCopyReport = useCallback(async () => {
-    const report = serializeRealtimeCallLabReport({
+    const report = serializeLiveMemorizationReport({
       version: APP_VERSION,
       exportedAt: new Date().toISOString(),
       backendBaseUrl: activeBackendBaseUrlRef.current ?? normalizedBackendUrl ?? backendUrlInput.trim(),
+      selectedCharacter: selectedCharacter ?? 'not selected',
+      startLineNumber: clampedStartLineNumber,
+      maxAttemptsPerLine: clampedMaxAttemptsPerLine,
       sessionId,
       callId,
       status,
@@ -808,14 +903,14 @@ export default function RealtimeCallLabPage() {
 
     try {
       await navigator.clipboard.writeText(report);
-      addLocalLog('Realtime Lab Report Copied');
+      addLocalLog('Live Memorization Report Copied');
       toast({
         title: 'Report copied',
-        description: 'The full browser and backend call log is now in the clipboard.',
+        description: 'The full memorization log is now in the clipboard.',
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown clipboard error';
-      addLocalLog('Realtime Lab Report Copy Failed', message);
+      addLocalLog('Live Memorization Report Copy Failed', message);
       toast({
         title: 'Copy failed',
         description: message,
@@ -823,9 +918,12 @@ export default function RealtimeCallLabPage() {
       });
     }
   }, [
+    activeResponseId,
     addLocalLog,
     backendUrlInput,
     callId,
+    clampedMaxAttemptsPerLine,
+    clampedStartLineNumber,
     connectionState,
     dataChannelState,
     iceConnectionState,
@@ -833,9 +931,9 @@ export default function RealtimeCallLabPage() {
     localLogs,
     normalizedBackendUrl,
     notes,
-    activeResponseId,
     remoteAudioAttached,
     remoteAudioPlaying,
+    selectedCharacter,
     serverLogs,
     sessionId,
     signalingState,
@@ -844,10 +942,13 @@ export default function RealtimeCallLabPage() {
   ]);
 
   const handleDownloadTextReport = useCallback(() => {
-    const report = serializeRealtimeCallLabReport({
+    const report = serializeLiveMemorizationReport({
       version: APP_VERSION,
       exportedAt: new Date().toISOString(),
       backendBaseUrl: activeBackendBaseUrlRef.current ?? normalizedBackendUrl ?? backendUrlInput.trim(),
+      selectedCharacter: selectedCharacter ?? 'not selected',
+      startLineNumber: clampedStartLineNumber,
+      maxAttemptsPerLine: clampedMaxAttemptsPerLine,
       sessionId,
       callId,
       status,
@@ -864,12 +965,15 @@ export default function RealtimeCallLabPage() {
       serverLogs,
     });
 
-    downloadFile(`realtime-call-lab-${APP_VERSION}.txt`, report, 'text/plain;charset=utf-8');
-    addLocalLog('Realtime Lab Text Report Downloaded');
+    downloadFile(`live-memorization-${APP_VERSION}.txt`, report, 'text/plain;charset=utf-8');
+    addLocalLog('Live Memorization Text Report Downloaded');
   }, [
+    activeResponseId,
     addLocalLog,
     backendUrlInput,
     callId,
+    clampedMaxAttemptsPerLine,
+    clampedStartLineNumber,
     connectionState,
     dataChannelState,
     iceConnectionState,
@@ -877,9 +981,9 @@ export default function RealtimeCallLabPage() {
     localLogs,
     normalizedBackendUrl,
     notes,
-    activeResponseId,
     remoteAudioAttached,
     remoteAudioPlaying,
+    selectedCharacter,
     serverLogs,
     sessionId,
     signalingState,
@@ -887,10 +991,13 @@ export default function RealtimeCallLabPage() {
   ]);
 
   const handleDownloadJsonReport = useCallback(() => {
-    const payload: RealtimeCallLabReport = {
+    const payload: LiveMemorizationReport = {
       version: APP_VERSION,
       exportedAt: new Date().toISOString(),
       backendBaseUrl: activeBackendBaseUrlRef.current ?? normalizedBackendUrl ?? backendUrlInput.trim(),
+      selectedCharacter: selectedCharacter ?? 'not selected',
+      startLineNumber: clampedStartLineNumber,
+      maxAttemptsPerLine: clampedMaxAttemptsPerLine,
       sessionId,
       callId,
       status,
@@ -908,15 +1015,18 @@ export default function RealtimeCallLabPage() {
     };
 
     downloadFile(
-      `realtime-call-lab-${APP_VERSION}.json`,
+      `live-memorization-${APP_VERSION}.json`,
       JSON.stringify(payload, null, 2),
       'application/json;charset=utf-8',
     );
-    addLocalLog('Realtime Lab JSON Report Downloaded');
+    addLocalLog('Live Memorization JSON Report Downloaded');
   }, [
+    activeResponseId,
     addLocalLog,
     backendUrlInput,
     callId,
+    clampedMaxAttemptsPerLine,
+    clampedStartLineNumber,
     connectionState,
     dataChannelState,
     iceConnectionState,
@@ -924,21 +1034,14 @@ export default function RealtimeCallLabPage() {
     localLogs,
     normalizedBackendUrl,
     notes,
-    activeResponseId,
     remoteAudioAttached,
     remoteAudioPlaying,
+    selectedCharacter,
     serverLogs,
     sessionId,
     signalingState,
     status,
   ]);
-
-  const handleClearLogs = useCallback(() => {
-    lastServerSeqRef.current = 0;
-    setLocalLogs([]);
-    setServerLogs([]);
-    addLocalLog('Realtime Lab Logs Cleared');
-  }, [addLocalLog]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -957,6 +1060,49 @@ export default function RealtimeCallLabPage() {
   }, [backendUrlInput]);
 
   useEffect(() => {
+    persistPreferredCharacter(selectedCharacter);
+  }, [selectedCharacter]);
+
+  useEffect(() => {
+    if (!script) {
+      return;
+    }
+
+    const availableCharacters = Array.from(new Set(script.lines.map((line) => line.character)));
+    if (
+      availableCharacters.length > 0 &&
+      (!selectedCharacter || !availableCharacters.includes(selectedCharacter))
+    ) {
+      setSelectedCharacter(availableCharacters[0]);
+    }
+
+    setStartLineNumber((currentLineNumber) =>
+      clampLiveMemorizationStartLine(currentLineNumber, script.lines.length),
+    );
+  }, [script, selectedCharacter]);
+
+  useEffect(() => {
+    async function loadScript() {
+      try {
+        const response = await fetch(`${import.meta.env.BASE_URL}script.json`);
+        if (!response.ok) {
+          throw new Error('Failed to load script');
+        }
+
+        const rawData = (await response.json()) as RawScript;
+        setScript(normalizeScript(rawData));
+        addLocalLog('Script Loaded', 'Loaded script.json successfully');
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Failed to load script';
+        setLoadError(message);
+        addLocalLog('Script Load Error', message);
+      }
+    }
+
+    void loadScript();
+  }, [addLocalLog]);
+
+  useEffect(() => {
     const queuedEntries = consumeQueuedPwaDebugLogs();
     if (queuedEntries.length > 0) {
       setLocalLogs((entries) => {
@@ -968,9 +1114,9 @@ export default function RealtimeCallLabPage() {
       });
     }
 
-    void capturePwaRuntimeDiagnostics(APP_VERSION, 'Realtime Lab Opened Snapshot', true);
+    void capturePwaRuntimeDiagnostics(APP_VERSION, 'Live Memorization Opened Snapshot', true);
     void requestServiceWorkerDebugSnapshot();
-    addLocalLog('Realtime Lab Opened', `version=${APP_VERSION}`);
+    addLocalLog('Live Memorization Opened', `version=${APP_VERSION}`);
 
     const unsubscribe = subscribeToPwaDebugLogs((entry) => {
       setLocalLogs((entries) => appendDebugLogEntry(entries, entry));
@@ -1030,22 +1176,18 @@ export default function RealtimeCallLabPage() {
   }, [cleanupActiveSession]);
 
   return (
-    <div
-      data-testid="realtime-call-lab-page"
-      className="min-h-screen bg-background text-foreground"
-    >
+    <div data-testid="live-memorization-page" className="min-h-screen bg-background text-foreground">
+      <audio ref={audioRef} autoPlay playsInline className="hidden" />
+
       <header className="border-b border-border/60 bg-background/95 backdrop-blur">
-        <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
           <div className="space-y-1">
-            <p className="text-xs font-medium uppercase tracking-[0.35em] text-primary/80">
-              Realtime Browser Lab
+            <p className="text-xs font-medium uppercase tracking-[0.25em] text-muted-foreground">
+              Live Memorization
             </p>
-            <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
-              WebRTC Call Spike
-            </h1>
-            <p className="max-w-2xl text-sm text-muted-foreground">
-              A side experiment for a real browser call architecture: one tap, live microphone,
-              remote audio stream, and backend session logging.
+            <h1 className="text-2xl font-semibold tracking-tight">Realtime Script Coach</h1>
+            <p className="text-sm text-muted-foreground">
+              First integrated version for testing voice-based memorization inside the app.
             </p>
           </div>
 
@@ -1061,350 +1203,309 @@ export default function RealtimeCallLabPage() {
         </div>
       </header>
 
-      <main className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-4 py-6 sm:px-6">
-        <Card className="border-primary/20 bg-primary/5">
-          <CardHeader className="pb-4">
-            <CardTitle className="flex items-center gap-2 text-xl">
-              <PhoneCall className="h-5 w-5 text-primary" />
-              Why This Experiment Exists
-            </CardTitle>
-            <CardDescription className="text-base leading-7">
-              The PWA path already tested delayed playback, warm microphone streams, and media
-              controls. This page changes the shape completely: browser WebRTC to a backend, plus
-              a sideband server log, so we can learn whether a true call session behaves more like
-              Jitsi or Talk and less like a fragile upload / playback chain.
-            </CardDescription>
-          </CardHeader>
-        </Card>
+      <main className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 py-4 sm:px-6">
+        {loadError && (
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>Script load failed</AlertTitle>
+            <AlertDescription>{loadError}</AlertDescription>
+          </Alert>
+        )}
 
-        <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
+        {errorMessage && (
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>Session issue</AlertTitle>
+            <AlertDescription>{errorMessage}</AlertDescription>
+          </Alert>
+        )}
+
+        <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <Server className="h-5 w-5 text-primary" />
-                Session Controls
+                <Sparkles className="h-5 w-5 text-primary" />
+                Scene Setup
               </CardTitle>
               <CardDescription>
-                Point the page at the separate backend, start one realtime call, then export both
-                the browser trace and the backend-side session log.
+                Choose the role, the entry point in the script, and how strict the coach should be.
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-5">
+            <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="realtime-backend-url">Backend URL</Label>
+                <Label htmlFor="live-memorization-backend-url">Backend URL</Label>
                 <Input
-                  id="realtime-backend-url"
-                  data-testid="input-realtime-backend-url"
+                  id="live-memorization-backend-url"
+                  data-testid="input-live-memorization-backend-url"
+                  placeholder={DEFAULT_BACKEND_PLACEHOLDER}
                   value={backendUrlInput}
                   onChange={(event) => setBackendUrlInput(event.target.value)}
-                  placeholder={DEFAULT_BACKEND_PLACEHOLDER}
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                  spellCheck={false}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Use a forwarded local backend such as a Codespaces public port for
-                  `experiments/realtime-webrtc-lab/server.ts`.
+                  This reuses the backend-assisted realtime path that is already working in the PWA.
                 </p>
               </div>
 
-              <div className="grid gap-4 md:grid-cols-2">
+              <CharacterSelector
+                characters={characters}
+                selectedCharacter={selectedCharacter}
+                onSelect={setSelectedCharacter}
+              />
+
+              <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
-                  <Label htmlFor="realtime-voice">Voice</Label>
+                  <Label htmlFor="live-memorization-start-line">Start Line</Label>
                   <Input
-                    id="realtime-voice"
-                    value={voice}
-                    onChange={(event) => setVoice(event.target.value)}
-                    placeholder={DEFAULT_VOICE}
+                    id="live-memorization-start-line"
+                    data-testid="input-live-memorization-start-line"
+                    type="number"
+                    min={1}
+                    max={script?.lines.length ?? 1}
+                    value={clampedStartLineNumber}
+                    onChange={(event) =>
+                      setStartLineNumber(Number.parseInt(event.target.value, 10) || 1)
+                    }
                   />
                 </div>
 
                 <div className="space-y-2">
-                  <Label>Turn Detection</Label>
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      type="button"
-                      variant={turnDetection === 'server_vad' ? 'default' : 'outline'}
-                      onClick={() => setTurnDetection('server_vad')}
-                    >
-                      Server VAD
-                    </Button>
-                    <Button
-                      type="button"
-                      variant={turnDetection === 'disabled' ? 'default' : 'outline'}
-                      onClick={() => setTurnDetection('disabled')}
-                    >
-                      Disabled
-                    </Button>
-                  </div>
+                  <Label htmlFor="live-memorization-attempts">Max Attempts Per Line</Label>
+                  <Input
+                    id="live-memorization-attempts"
+                    data-testid="input-live-memorization-attempts"
+                    type="number"
+                    min={1}
+                    max={5}
+                    value={clampedMaxAttemptsPerLine}
+                    onChange={(event) =>
+                      setMaxAttemptsPerLine(Number.parseInt(event.target.value, 10) || DEFAULT_MAX_ATTEMPTS)
+                    }
+                  />
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="realtime-instructions">Session Instructions</Label>
-                <Textarea
-                  id="realtime-instructions"
-                  value={instructions}
-                  onChange={(event) => setInstructions(event.target.value)}
-                  rows={4}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="realtime-greeting">Startup Greeting Prompt</Label>
-                <Textarea
-                  id="realtime-greeting"
-                  value={greetingPrompt}
-                  onChange={(event) => setGreetingPrompt(event.target.value)}
-                  rows={3}
-                />
-                <p className="text-xs text-muted-foreground">
-                  This prompt is sent by the backend right after the sideband session opens, so we
-                  can test immediate remote speech without another tap.
+              <div className="rounded-2xl border border-border/60 bg-muted/20 p-4 text-sm text-muted-foreground">
+                <p className="font-medium text-foreground">Voice commands the model should understand</p>
+                <p className="mt-2">
+                  Say <span className="font-medium text-foreground">repeat</span> to hear the cue
+                  again, <span className="font-medium text-foreground">skip</span> to move on, or{' '}
+                  <span className="font-medium text-foreground">line please</span> if you want the
+                  answer revealed once.
                 </p>
               </div>
+            </CardContent>
+          </Card>
 
-              <div className="flex flex-wrap gap-3">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Activity className="h-5 w-5 text-primary" />
+                Session State
+              </CardTitle>
+              <CardDescription>
+                Start the realtime coach, then use the quick controls only when the assistant is
+                idle.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex flex-wrap gap-2">
+                <Badge variant={getStatusVariant(status)}>{status}</Badge>
+                <Badge variant={remoteAudioPlaying ? 'default' : 'outline'}>
+                  audio {remoteAudioPlaying ? 'playing' : 'idle'}
+                </Badge>
+                <Badge variant={activeResponseId ? 'secondary' : 'outline'}>
+                  {activeResponseId ? 'assistant busy' : 'assistant idle'}
+                </Badge>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl border p-3">
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    <Wifi className="h-4 w-4 text-primary" />
+                    Backend
+                  </div>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    {backendHealth
+                      ? `ok=${backendHealth.ok ? 'yes' : 'no'} | openai=${
+                          backendHealth.openAiConfigured ? 'yes' : 'no'
+                        } | uptime=${backendHealth.uptimeSeconds}s`
+                      : 'Not checked yet'}
+                  </p>
+                </div>
+                <div className="rounded-2xl border p-3">
+                  <div className="flex items-center gap-2 text-sm font-medium">
+                    <Radio className="h-4 w-4 text-primary" />
+                    Call
+                  </div>
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    {sessionId ? `session=${sessionId}` : 'No active session'}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {callId ? `call=${callId}` : 'Call ID not assigned yet'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid gap-2 sm:grid-cols-3">
                 <Button
-                  data-testid="button-realtime-health"
+                  data-testid="button-live-memorization-check-backend"
                   type="button"
                   variant="outline"
                   onClick={() => {
                     void checkBackendHealth();
                   }}
                 >
-                  <RefreshCw className="mr-2 h-4 w-4" />
+                  <Server className="mr-2 h-4 w-4" />
                   Check Backend
                 </Button>
                 <Button
-                  data-testid="button-realtime-snapshot"
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    void captureManualSnapshot();
-                  }}
-                >
-                  <Activity className="mr-2 h-4 w-4" />
-                  Snapshot
-                </Button>
-                <Button
-                  data-testid="button-realtime-start"
+                  data-testid="button-live-memorization-start"
                   type="button"
                   onClick={() => {
                     void handleStartSession();
                   }}
-                  disabled={status === 'requesting-mic' || status === 'negotiating' || status === 'stopping'}
+                  disabled={!canStartSession || status === 'requesting-mic' || status === 'negotiating'}
                 >
-                  <PhoneCall className="mr-2 h-4 w-4" />
+                  {status === 'requesting-mic' || status === 'negotiating' ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Mic className="mr-2 h-4 w-4" />
+                  )}
                   Start Session
                 </Button>
                 <Button
-                  data-testid="button-realtime-stop"
+                  data-testid="button-live-memorization-stop"
                   type="button"
-                  variant="destructive"
+                  variant="outline"
                   onClick={() => {
                     void handleStopSession();
                   }}
-                  disabled={status === 'idle' || status === 'stopped' || status === 'checking-backend'}
+                  disabled={!sessionId && status !== 'connected'}
                 >
-                  <PhoneOff className="mr-2 h-4 w-4" />
-                  Stop Session
+                  <AudioLines className="mr-2 h-4 w-4" />
+                  Stop
                 </Button>
               </div>
 
-              <div className="space-y-2 rounded-2xl border p-4">
-                <Label htmlFor="realtime-manual-prompt">Manual Realtime Prompt</Label>
+              <div className="grid gap-2 sm:grid-cols-3">
+                <Button
+                  data-testid="button-live-memorization-repeat"
+                  type="button"
+                  variant="secondary"
+                  onClick={() =>
+                    sendControlPrompt(
+                      buildLiveMemorizationRepeatPrompt(),
+                      'Repeat cue',
+                      'The coach was asked to repeat the current scripted cue.',
+                    )
+                  }
+                  disabled={status !== 'connected' || Boolean(activeResponseId)}
+                >
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  Repeat Cue
+                </Button>
+                <Button
+                  data-testid="button-live-memorization-reveal"
+                  type="button"
+                  variant="secondary"
+                  onClick={() =>
+                    sendControlPrompt(
+                      buildLiveMemorizationRevealPrompt(),
+                      'Reveal next line',
+                      'The coach was asked to reveal the next expected user line once.',
+                    )
+                  }
+                  disabled={status !== 'connected' || Boolean(activeResponseId)}
+                >
+                  <Sparkles className="mr-2 h-4 w-4" />
+                  Reveal Line
+                </Button>
+                <Button
+                  data-testid="button-live-memorization-continue"
+                  type="button"
+                  variant="secondary"
+                  onClick={() =>
+                    sendControlPrompt(
+                      buildLiveMemorizationContinuePrompt(),
+                      'Continue',
+                      'The coach was asked to continue from the current place in the scene.',
+                    )
+                  }
+                  disabled={status !== 'connected' || Boolean(activeResponseId)}
+                >
+                  <SkipForward className="mr-2 h-4 w-4" />
+                  Continue
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+          <Card>
+            <CardHeader>
+              <CardTitle>Generated Coach Instructions</CardTitle>
+              <CardDescription>
+                This is the exact session instruction block sent to the realtime model for the live
+                memorization run.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="live-memorization-greeting">Opening Prompt</Label>
                 <Textarea
-                  id="realtime-manual-prompt"
-                  value={responsePrompt}
-                  onChange={(event) => setResponsePrompt(event.target.value)}
-                  rows={3}
+                  id="live-memorization-greeting"
+                  value={generatedGreetingPrompt}
+                  readOnly
+                  className="min-h-[96px]"
                 />
-                <div className="flex flex-wrap gap-3">
-                  <Button
-                    data-testid="button-realtime-send-prompt"
-                    type="button"
-                    variant="outline"
-                    onClick={handleSendPrompt}
-                    disabled={status !== 'connected' || Boolean(activeResponseId)}
-                  >
-                    <Send className="mr-2 h-4 w-4" />
-                    Send Prompt
-                  </Button>
-                  <p className="text-xs text-muted-foreground">
-                    This goes through the client data channel only while the assistant is idle.
-                  </p>
-                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="live-memorization-instructions">Session Instructions</Label>
+                <Textarea
+                  id="live-memorization-instructions"
+                  data-testid="textarea-live-memorization-instructions"
+                  value={generatedInstructions}
+                  readOnly
+                  className="min-h-[340px] font-mono text-xs"
+                />
               </div>
             </CardContent>
           </Card>
 
-          <div className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Wifi className="h-5 w-5 text-primary" />
-                  Live Status
-                </CardTitle>
-                <CardDescription>
-                  These are the local browser connection signals we care about most during the next
-                  iPhone run.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex flex-wrap gap-2">
-                  <Badge variant={getStatusVariant(status)}>{status}</Badge>
-                  <Badge variant="outline">version {APP_VERSION}</Badge>
-                  <Badge variant={activeResponseId ? 'secondary' : 'outline'}>
-                    {activeResponseId ? 'assistant busy' : 'assistant idle'}
-                  </Badge>
-                  {sessionId && <Badge variant="outline">session {sessionId}</Badge>}
-                  {callId && <Badge variant="outline">call {callId}</Badge>}
-                </div>
-
-                {errorMessage && (
-                  <div className="rounded-2xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
-                    {errorMessage}
-                  </div>
-                )}
-
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-2xl border p-3">
-                    <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                      Peer
-                    </p>
-                    <p className="mt-2 text-sm font-medium">{connectionState}</p>
-                  </div>
-                  <div className="rounded-2xl border p-3">
-                    <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                      Signaling
-                    </p>
-                    <p className="mt-2 text-sm font-medium">{signalingState}</p>
-                  </div>
-                  <div className="rounded-2xl border p-3">
-                    <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                      ICE Connection
-                    </p>
-                    <p className="mt-2 text-sm font-medium">{iceConnectionState}</p>
-                  </div>
-                  <div className="rounded-2xl border p-3">
-                    <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                      ICE Gathering
-                    </p>
-                    <p className="mt-2 text-sm font-medium">{iceGatheringState}</p>
-                  </div>
-                  <div className="rounded-2xl border p-3">
-                    <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                      Data Channel
-                    </p>
-                    <p className="mt-2 text-sm font-medium">{dataChannelState}</p>
-                  </div>
-                  <div className="rounded-2xl border p-3">
-                    <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">
-                      Remote Audio
-                    </p>
-                    <p className="mt-2 text-sm font-medium">
-                      {remoteAudioAttached ? 'attached' : 'not attached'}
-                      {remoteAudioPlaying ? ' · playing' : ''}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border p-4">
-                  <div className="flex items-center gap-2 text-sm font-medium">
-                    <AudioLines className="h-4 w-4 text-primary" />
-                    Remote Audio Monitor
-                  </div>
-                  <audio
-                    ref={audioRef}
-                    autoPlay
-                    controls
-                    playsInline
-                    className="mt-3 w-full"
-                  />
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Mic className="h-5 w-5 text-primary" />
-                  Backend Snapshot
-                </CardTitle>
-                <CardDescription>
-                  A quick way to confirm the local server is reachable from the phone and actually
-                  has an OpenAI key configured.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3 text-sm">
-                <div className="rounded-2xl border p-4">
-                  <p className="font-medium">
-                    {backendHealth
-                      ? backendHealth.ok
-                        ? 'Backend reachable'
-                        : 'Backend returned a non-ok result'
-                      : 'No health snapshot yet'}
-                  </p>
-                  <p className="mt-2 text-muted-foreground">
-                    {backendHealth
-                      ? `checked=${backendHealth.checkedAt} | openai=${backendHealth.openAiConfigured ? 'yes' : 'no'} | uptime=${backendHealth.uptimeSeconds}s`
-                      : 'Run “Check Backend” once before the phone test starts.'}
-                  </p>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Saved backend URL: {normalizedBackendUrl ?? 'not configured yet'}
-                </p>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-
-        <div className="grid gap-6 xl:grid-cols-2">
           <Card>
             <CardHeader>
-              <CardTitle>Local Browser Log</CardTitle>
+              <CardTitle>Starting Window</CardTitle>
               <CardDescription>
-                PWA snapshot events, peer connection state, ICE changes, data channel messages, and
-                audio-element state all land here.
+                First lines from the chosen start point, with the model’s role marked explicitly.
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <ScrollArea className="h-80 rounded-2xl border bg-muted/20 p-4">
-                <pre
-                  data-testid="realtime-local-log"
-                  className="whitespace-pre-wrap break-words text-xs leading-6"
-                >
-                  {serializeDebugLogEntries(localLogs)}
-                </pre>
-              </ScrollArea>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Backend Session Log</CardTitle>
-              <CardDescription>
-                These logs come from the local helper server and include call creation, sideband
-                websocket events, and backend-side realtime responses.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <ScrollArea className="h-80 rounded-2xl border bg-muted/20 p-4">
-                <pre
-                  data-testid="realtime-server-log"
-                  className="whitespace-pre-wrap break-words text-xs leading-6"
-                >
-                  {serverLogs.length === 0
-                    ? 'No backend logs recorded yet.'
-                    : serverLogs
-                        .map((entry) =>
-                          entry.details
-                            ? `[${entry.timestamp}] ${entry.level.toUpperCase()} ${entry.event} — ${entry.details}`
-                            : `[${entry.timestamp}] ${entry.level.toUpperCase()} ${entry.event}`,
-                        )
-                        .join('\n')}
-                </pre>
+            <CardContent>
+              <ScrollArea className="h-[470px] pr-4">
+                <div className="space-y-3">
+                  {previewLines.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">
+                      Load the script and choose a character to preview the live memorization plan.
+                    </p>
+                  ) : (
+                    previewLines.map((line) => {
+                      const isUserLine = line.includes('[USER]');
+                      return (
+                        <div
+                          key={line}
+                          className={`rounded-2xl border p-3 text-sm ${
+                            isUserLine
+                              ? 'border-primary/40 bg-primary/5'
+                              : 'border-border/60 bg-muted/20'
+                          }`}
+                        >
+                          {line}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
               </ScrollArea>
             </CardContent>
           </Card>
@@ -1412,63 +1513,65 @@ export default function RealtimeCallLabPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Export And Notes</CardTitle>
+            <CardTitle>Debug And Export</CardTitle>
             <CardDescription>
-              Add anything the phone test felt like and export the full report so the next change is
-              based on evidence, not memory.
+              Keep the logs detailed so we can understand where the coaching loop works and where it
+              still drifts.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="realtime-notes">Tester Notes</Label>
+              <Label htmlFor="live-memorization-notes">Tester Notes</Label>
               <Textarea
-                id="realtime-notes"
+                id="live-memorization-notes"
                 value={notes}
                 onChange={(event) => setNotes(event.target.value)}
-                rows={4}
-                placeholder="What happened on the phone? Did the remote voice play? Did audio stay alive after you spoke?"
+                placeholder="What felt good? Did the model stay on script? Did the corrections help?"
               />
             </div>
 
-            <div className="flex flex-wrap gap-3">
-              <Button
-                data-testid="button-realtime-copy-report"
-                type="button"
-                variant="outline"
-                onClick={() => {
-                  void handleCopyReport();
-                }}
-              >
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="outline" onClick={() => void handleCopyReport()}>
                 <Copy className="mr-2 h-4 w-4" />
                 Copy Report
               </Button>
-              <Button
-                data-testid="button-realtime-download-text"
-                type="button"
-                variant="outline"
-                onClick={handleDownloadTextReport}
-              >
+              <Button type="button" variant="outline" onClick={handleDownloadTextReport}>
                 <Download className="mr-2 h-4 w-4" />
                 Download Text
               </Button>
-              <Button
-                data-testid="button-realtime-download-json"
-                type="button"
-                variant="outline"
-                onClick={handleDownloadJsonReport}
-              >
+              <Button type="button" variant="outline" onClick={handleDownloadJsonReport}>
                 <Download className="mr-2 h-4 w-4" />
                 Download JSON
               </Button>
-              <Button
-                data-testid="button-realtime-clear-logs"
-                type="button"
-                variant="ghost"
-                onClick={handleClearLogs}
-              >
-                Clear Logs
-              </Button>
             </div>
+
+            <ScrollArea className="h-[360px] rounded-2xl border bg-muted/20 p-3">
+              <pre className="whitespace-pre-wrap break-words font-mono text-xs">
+                {serializeLiveMemorizationReport({
+                  version: APP_VERSION,
+                  exportedAt: new Date().toISOString(),
+                  backendBaseUrl:
+                    activeBackendBaseUrlRef.current ?? normalizedBackendUrl ?? backendUrlInput.trim(),
+                  selectedCharacter: selectedCharacter ?? 'not selected',
+                  startLineNumber: clampedStartLineNumber,
+                  maxAttemptsPerLine: clampedMaxAttemptsPerLine,
+                  sessionId,
+                  callId,
+                  status,
+                  connectionState,
+                  iceConnectionState,
+                  iceGatheringState,
+                  signalingState,
+                  dataChannelState,
+                  remoteAudioAttached,
+                  remoteAudioPlaying,
+                  activeResponseId,
+                  notes,
+                  localLogs,
+                  serverLogs,
+                })}
+              </pre>
+            </ScrollArea>
           </CardContent>
         </Card>
       </main>

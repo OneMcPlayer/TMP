@@ -2,6 +2,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { getCurrentAppRoute } from "@/lib/app-route";
 import AudioLabPage from "@/pages/audio-lab";
+import LiveMemorizationPage from "@/pages/live-memorization";
 import RealtimeCallLabPage from "@/pages/realtime-call-lab";
 import RehearsalPage from "@/pages/rehearsal";
 import { useEffect, useState } from "react";
@@ -27,6 +28,8 @@ function App() {
         <AudioLabPage />
       ) : route === "realtime-lab" ? (
         <RealtimeCallLabPage />
+      ) : route === "live-memorization" ? (
+        <LiveMemorizationPage />
       ) : (
         <RehearsalPage />
       )}

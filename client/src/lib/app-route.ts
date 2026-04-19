@@ -1,7 +1,8 @@
-export type AppRoute = 'rehearsal' | 'audio-lab' | 'realtime-lab';
+export type AppRoute = 'rehearsal' | 'audio-lab' | 'realtime-lab' | 'live-memorization';
 
 const AUDIO_LAB_HASHES = new Set(['#audio-lab', '#/audio-lab']);
 const REALTIME_LAB_HASHES = new Set(['#realtime-lab', '#/realtime-lab']);
+const LIVE_MEMORIZATION_HASHES = new Set(['#live-memorization', '#/live-memorization']);
 const REHEARSAL_HASHES = new Set(['', '#', '#/', '#rehearsal', '#/rehearsal']);
 
 export function getAppRouteFromHash(hash: string): AppRoute {
@@ -15,6 +16,10 @@ export function getAppRouteFromHash(hash: string): AppRoute {
     return 'realtime-lab';
   }
 
+  if (LIVE_MEMORIZATION_HASHES.has(normalizedHash)) {
+    return 'live-memorization';
+  }
+
   if (REHEARSAL_HASHES.has(normalizedHash)) {
     return 'rehearsal';
   }
@@ -25,6 +30,10 @@ export function getAppRouteFromHash(hash: string): AppRoute {
 
   if (normalizedHash.includes('realtime-lab')) {
     return 'realtime-lab';
+  }
+
+  if (normalizedHash.includes('live-memorization')) {
+    return 'live-memorization';
   }
 
   return 'rehearsal';
@@ -45,6 +54,10 @@ export function buildAppRouteHref(route: AppRoute): string {
 
   if (route === 'realtime-lab') {
     return '#/realtime-lab';
+  }
+
+  if (route === 'live-memorization') {
+    return '#/live-memorization';
   }
 
   return '#/';

@@ -53,6 +53,18 @@ test.describe('rehearsal browser e2e', () => {
     await expect(page.getByTestId('button-realtime-start')).toBeVisible();
   });
 
+  test('opens the live memorization page from the launch screen', async ({ page }) => {
+    await setupRehearsalApp(page, {
+      script: PARTNER_LEAD_SCRIPT,
+      selectedCharacter: 'BOB',
+    });
+
+    await page.getByTestId('button-open-live-memorization').click();
+    await expect(page.getByTestId('live-memorization-page')).toBeVisible();
+    await expect(page.getByText('Realtime Script Coach')).toBeVisible();
+    await expect(page.getByTestId('button-live-memorization-start')).toBeVisible();
+  });
+
   test('keeps the settings button available on the launch screen', async ({ page }) => {
     await setupRehearsalApp(page, {
       script: PARTNER_LEAD_SCRIPT,

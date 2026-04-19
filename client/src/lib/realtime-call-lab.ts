@@ -22,9 +22,15 @@ export interface RealtimeCallLabReport {
   dataChannelState: string;
   remoteAudioAttached: boolean;
   remoteAudioPlaying: boolean;
+  activeResponseId?: string | null;
   notes?: string;
   localLogs: DebugLogEntry[];
   serverLogs: RealtimeServerLogEntry[];
+}
+
+export interface RealtimeResponseLifecycleUpdate {
+  responseId: string | null;
+  state: 'started' | 'finished';
 }
 
 export const REALTIME_CALL_LAB_BACKEND_STORAGE_KEY = 'realtime_call_lab_backend_url';
@@ -74,6 +80,35 @@ export function summarizeRealtimeEvent(payload: unknown): string {
   return parts.length > 0 ? parts.join(' | ') : 'Realtime event received';
 }
 
+export function getRealtimeResponseLifecycleUpdate(
+  payload: unknown,
+): RealtimeResponseLifecycleUpdate | null {
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+
+  const event = payload as {
+    response?: { id?: string };
+    type?: string;
+  };
+
+  if (event.type === 'response.created') {
+    return {
+      responseId: typeof event.response?.id === 'string' ? event.response.id : null,
+      state: 'started',
+    };
+  }
+
+  if (event.type === 'response.done') {
+    return {
+      responseId: typeof event.response?.id === 'string' ? event.response.id : null,
+      state: 'finished',
+    };
+  }
+
+  return null;
+}
+
 export function serializeRealtimeServerLogs(entries: RealtimeServerLogEntry[]): string {
   if (entries.length === 0) {
     return 'No backend logs recorded yet.';
@@ -107,6 +142,7 @@ export function serializeRealtimeCallLabReport(
     `Data channel: ${report.dataChannelState}`,
     `Remote audio attached: ${report.remoteAudioAttached ? 'yes' : 'no'}`,
     `Remote audio playing: ${report.remoteAudioPlaying ? 'yes' : 'no'}`,
+    `Active response: ${report.activeResponseId ?? 'none'}`,
     '',
     'Notes',
     report.notes?.trim() || 'No tester notes provided.',

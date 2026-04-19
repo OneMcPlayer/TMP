@@ -1929,6 +1929,9 @@ export default function RehearsalPage() {
                 <Button asChild data-testid="button-open-realtime-lab" variant="ghost">
                   <a href={buildAppRouteHref('realtime-lab')}>Open Realtime Lab</a>
                 </Button>
+                <Button asChild data-testid="button-open-live-memorization" variant="ghost">
+                  <a href={buildAppRouteHref('live-memorization')}>Open Live Memorization</a>
+                </Button>
               </div>
             }
             microphoneStatus={microphoneSetupStatus}
