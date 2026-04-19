@@ -217,7 +217,7 @@ async function connectSidebandSocket(
         JSON.stringify({
           type: 'response.create',
           response: {
-            output_modalities: ['audio', 'text'],
+            output_modalities: ['audio'],
             instructions: options.greetingPrompt.trim(),
           },
         }),

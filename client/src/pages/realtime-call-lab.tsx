@@ -511,7 +511,7 @@ export default function RealtimeCallLabPage() {
       JSON.stringify({
         type: 'response.create',
         response: {
-          output_modalities: ['audio', 'text'],
+          output_modalities: ['audio'],
           instructions: prompt,
         },
       }),
