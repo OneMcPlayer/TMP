@@ -39,6 +39,15 @@ type SessionResponseQueueItem = {
   text: string;
 };
 
+type SessionSpeechEvent = {
+  seq: number;
+  timestamp: string;
+  purpose: string;
+  text: string;
+  audioBuffer: Buffer | null;
+  audioContentType: string | null;
+};
+
 type BaseRealtimeLabSession = {
   id: string;
   createdAt: number;
@@ -50,6 +59,8 @@ type BaseRealtimeLabSession = {
   sidebandSocket: WebSocket | null;
   activeResponseId: string | null;
   responseQueue: SessionResponseQueueItem[];
+  speechEvents: SessionSpeechEvent[];
+  nextSpeechSeq: number;
   voice: string;
 };
 
@@ -101,6 +112,9 @@ const SESSION_TTL_MS = 30 * 60 * 1000;
 const DEFAULT_PORT = Number.parseInt(process.env.PORT ?? '8787', 10);
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY ?? '';
 const LIVE_MEMORIZATION_TRANSCRIPTION_MODEL = 'gpt-4o-mini-transcribe';
+const LIVE_MEMORIZATION_TTS_MODEL = 'tts-1';
+const LIVE_MEMORIZATION_TTS_RESPONSE_FORMAT = 'mp3';
+const MAX_SPEECH_EVENTS_PER_SESSION = 200;
 
 const app = express();
 const sessions = new Map<string, RealtimeLabSession>();
@@ -168,6 +182,8 @@ function createBaseSession(model: string, voice: string): BaseRealtimeLabSession
     sidebandSocket: null,
     activeResponseId: null,
     responseQueue: [],
+    speechEvents: [],
+    nextSpeechSeq: 1,
     voice,
   };
 }
@@ -313,10 +329,9 @@ function buildLiveMemorizationSessionConfiguration(
     type: 'realtime',
     model: sessionModelForRequest(session.model),
     instructions: [
-      'You are the audio renderer for a live memorization drill.',
-      'Do not improvise or continue the scene on your own.',
-      'Only speak when a response.create event explicitly asks you to render exact text.',
-      'When you do speak, say exactly that text and nothing else.',
+      'You are the transcription engine for a live memorization drill.',
+      'Do not speak, improvise, coach, or continue the scene on your own.',
+      'Your only job is to process the incoming microphone audio and support interruption detection.',
     ].join(' '),
     output_modalities: ['audio'],
     audio: {
@@ -369,6 +384,25 @@ function buildExactSpeechInstructions(text: string): string {
   ].join('\n');
 }
 
+function appendSessionSpeechEvent(
+  session: RealtimeLabSession,
+  purpose: string,
+  text: string,
+): SessionSpeechEvent {
+  const event: SessionSpeechEvent = {
+    seq: session.nextSpeechSeq,
+    timestamp: formatTimestamp(),
+    purpose,
+    text,
+    audioBuffer: null,
+    audioContentType: null,
+  };
+
+  session.nextSpeechSeq += 1;
+  session.speechEvents = [...session.speechEvents, event].slice(-MAX_SPEECH_EVENTS_PER_SESSION);
+  return event;
+}
+
 function enqueueSessionSpeech(
   session: RealtimeLabSession,
   text: string,
@@ -376,6 +410,18 @@ function enqueueSessionSpeech(
 ): void {
   const trimmedText = text.trim();
   if (!trimmedText) {
+    return;
+  }
+
+  if (isLiveMemorizationSession(session)) {
+    rememberLiveMemorizationSpeech(session.liveMemorization.controller, trimmedText);
+    const speechEvent = appendSessionSpeechEvent(session, purpose, trimmedText);
+    appendSessionLog(
+      session,
+      'info',
+      'Speech Queued',
+      `seq=${speechEvent.seq} | purpose=${purpose} | text=${trimmedText}`,
+    );
     return;
   }
 
@@ -396,10 +442,6 @@ function flushSessionSpeechQueue(session: RealtimeLabSession): void {
   const nextSpeech = session.responseQueue.shift();
   if (!nextSpeech) {
     return;
-  }
-
-  if (isLiveMemorizationSession(session)) {
-    rememberLiveMemorizationSpeech(session.liveMemorization.controller, nextSpeech.text);
   }
 
   session.activeResponseId = 'pending';
@@ -425,6 +467,84 @@ function flushSessionSpeechQueue(session: RealtimeLabSession): void {
     session.activeResponseId = null;
     session.responseQueue.unshift(nextSpeech);
   }
+}
+
+function buildPublicSpeechEvents(
+  speechEvents: SessionSpeechEvent[],
+  afterSeq: number,
+): Array<Pick<SessionSpeechEvent, 'seq' | 'timestamp' | 'purpose' | 'text'>> {
+  return speechEvents
+    .filter((event) => event.seq > afterSeq)
+    .map(({ seq, timestamp, purpose, text }) => ({
+      seq,
+      timestamp,
+      purpose,
+      text,
+    }));
+}
+
+function findSpeechEvent(
+  session: RealtimeLabSession,
+  speechSeq: number,
+): SessionSpeechEvent | undefined {
+  return session.speechEvents.find((event) => event.seq === speechSeq);
+}
+
+async function synthesizeSpeechEventAudio(
+  session: RealtimeLabSession,
+  speechEvent: SessionSpeechEvent,
+): Promise<{ audioBuffer: Buffer; contentType: string }> {
+  if (speechEvent.audioBuffer && speechEvent.audioContentType) {
+    return {
+      audioBuffer: speechEvent.audioBuffer,
+      contentType: speechEvent.audioContentType,
+    };
+  }
+
+  appendSessionLog(
+    session,
+    'info',
+    'Speech Audio Requested',
+    `seq=${speechEvent.seq} | purpose=${speechEvent.purpose}`,
+  );
+
+  const ttsResponse = await fetch('https://api.openai.com/v1/audio/speech', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: LIVE_MEMORIZATION_TTS_MODEL,
+      input: speechEvent.text,
+      voice: session.voice,
+      response_format: LIVE_MEMORIZATION_TTS_RESPONSE_FORMAT,
+    }),
+  });
+
+  if (!ttsResponse.ok) {
+    const errorText = await ttsResponse.text();
+    throw new Error(
+      errorText || `Speech synthesis failed with status ${ttsResponse.status}.`,
+    );
+  }
+
+  const audioBuffer = Buffer.from(await ttsResponse.arrayBuffer());
+  const contentType = ttsResponse.headers.get('content-type') || 'audio/mpeg';
+  speechEvent.audioBuffer = audioBuffer;
+  speechEvent.audioContentType = contentType;
+
+  appendSessionLog(
+    session,
+    'info',
+    'Speech Audio Cached',
+    `seq=${speechEvent.seq} | bytes=${audioBuffer.byteLength}`,
+  );
+
+  return {
+    audioBuffer,
+    contentType,
+  };
 }
 
 function queueLiveMemorizationCompletionIfNeeded(
@@ -1085,6 +1205,75 @@ app.post('/api/realtime-webrtc/sessions/:sessionId/live-memorization/control', (
     status: session.status,
   });
 });
+
+app.get('/api/realtime-webrtc/sessions/:sessionId/live-memorization/state', (req, res) => {
+  const session = sessions.get(req.params.sessionId);
+  if (!session || !isLiveMemorizationSession(session)) {
+    res.status(404).json({
+      error: 'Live memorization session not found.',
+    });
+    return;
+  }
+
+  const afterSpeechSeq = Number.parseInt(String(req.query.afterSpeechSeq ?? '0'), 10);
+  const safeAfterSpeechSeq = Number.isFinite(afterSpeechSeq) ? afterSpeechSeq : 0;
+  const currentLine = getCurrentLiveMemorizationLine(session.liveMemorization.controller);
+
+  res.json({
+    callId: session.callId,
+    currentLineNumber: currentLine?.lineNumber ?? null,
+    speech: buildPublicSpeechEvents(session.speechEvents, safeAfterSpeechSeq),
+    status: session.status,
+  });
+});
+
+app.get(
+  '/api/realtime-webrtc/sessions/:sessionId/live-memorization/speech/:speechSeq/audio',
+  async (req, res) => {
+    const session = sessions.get(req.params.sessionId);
+    if (!session || !isLiveMemorizationSession(session)) {
+      res.status(404).json({
+        error: 'Live memorization session not found.',
+      });
+      return;
+    }
+
+    const speechSeq = Number.parseInt(req.params.speechSeq, 10);
+    if (!Number.isFinite(speechSeq) || speechSeq < 1) {
+      res.status(400).json({
+        error: 'speechSeq must be a positive integer.',
+      });
+      return;
+    }
+
+    const speechEvent = findSpeechEvent(session, speechSeq);
+    if (!speechEvent) {
+      res.status(404).json({
+        error: 'Speech event not found for this session.',
+      });
+      return;
+    }
+
+    try {
+      const { audioBuffer, contentType } = await synthesizeSpeechEventAudio(session, speechEvent);
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Cache-Control', 'private, max-age=300');
+      res.send(audioBuffer);
+    } catch (error) {
+      appendSessionLog(
+        session,
+        'error',
+        'Speech Audio Failed',
+        `seq=${speechEvent.seq} | ${
+          error instanceof Error ? error.message : 'Unknown speech-audio error'
+        }`,
+      );
+      res.status(502).json({
+        error: error instanceof Error ? error.message : 'Unknown speech-audio error',
+      });
+    }
+  },
+);
 
 app.get('/api/realtime-webrtc/sessions/:sessionId/logs', (req, res) => {
   const session = sessions.get(req.params.sessionId);

@@ -27,6 +27,7 @@ export interface LiveMemorizationReport {
   dataChannelState: string;
   remoteAudioAttached: boolean;
   remoteAudioPlaying: boolean;
+  coachAudioPlaying?: boolean;
   activeResponseId?: string | null;
   notes?: string;
   localLogs: DebugLogEntry[];
@@ -185,6 +186,7 @@ export function serializeLiveMemorizationReport(report: LiveMemorizationReport):
     `Data channel: ${report.dataChannelState}`,
     `Remote audio attached: ${report.remoteAudioAttached ? 'yes' : 'no'}`,
     `Remote audio playing: ${report.remoteAudioPlaying ? 'yes' : 'no'}`,
+    `Coach audio playing: ${report.coachAudioPlaying ? 'yes' : 'no'}`,
     `Active response: ${report.activeResponseId ?? 'none'}`,
     '',
     'Notes',

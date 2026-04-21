@@ -100,6 +100,10 @@ interface SpeechToTextOptions {
   prompt?: string;
 }
 
+interface PlayAudioBlobOptions {
+  signal?: AbortSignal;
+}
+
 export function getAudioUploadFilename(audioBlob: Blob): string {
   const mimeType = audioBlob.type.split(';', 1)[0];
 
@@ -400,8 +404,24 @@ export function playRecordingStartCue(
   });
 }
 
-export function playAudioBlob(blob: Blob): Promise<void> {
+function createAbortError(): Error {
+  try {
+    return new DOMException('Audio playback aborted', 'AbortError');
+  } catch {
+    return new Error('Audio playback aborted');
+  }
+}
+
+export function playAudioBlob(
+  blob: Blob,
+  options: PlayAudioBlobOptions = {},
+): Promise<void> {
   return new Promise((resolve, reject) => {
+    if (options.signal?.aborted) {
+      reject(createAbortError());
+      return;
+    }
+
     const url = URL.createObjectURL(blob);
     const audio = getPlaybackAudioElement();
     let settled = false;
@@ -432,21 +452,34 @@ export function playAudioBlob(blob: Blob): Promise<void> {
       callback();
     };
 
+    const handleAbort = () => {
+      audio.pause();
+      audio.currentTime = 0;
+      finalize(() => {
+        reject(createAbortError());
+      });
+    };
+
     audio.onended = () => {
+      options.signal?.removeEventListener('abort', handleAbort);
       finalize(resolve);
     };
 
     audio.onerror = () => {
+      options.signal?.removeEventListener('abort', handleAbort);
       finalize(() => {
         reject(new Error('Audio playback failed'));
       });
     };
+
+    options.signal?.addEventListener('abort', handleAbort, { once: true });
 
     audio.play().catch((error) => {
       if (isRetryableNetworkError(error) || (error instanceof DOMException && error.name === 'NotAllowedError')) {
         playbackPrimingPromise = null;
       }
 
+      options.signal?.removeEventListener('abort', handleAbort);
       finalize(() => {
         reject(error);
       });

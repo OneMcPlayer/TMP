@@ -27,6 +27,10 @@ import {
   type DebugLogEntry,
 } from '@/lib/debug-log';
 import {
+  playAudioBlob,
+  primeAudioPlayback,
+} from '@/lib/openai';
+import {
   consumeQueuedPwaDebugLogs,
   capturePwaRuntimeDiagnostics,
   requestServiceWorkerDebugSnapshot,
@@ -83,10 +87,18 @@ interface RealtimeCallResponse {
   voice: string;
 }
 
+interface LiveMemorizationSpeechEvent {
+  seq: number;
+  timestamp: string;
+  purpose: string;
+  text: string;
+}
+
 const DEFAULT_BACKEND_PLACEHOLDER = 'https://your-codespace-8787.your-forwarding-domain';
 const DEFAULT_MAX_ATTEMPTS = 3;
 const DEFAULT_VOICE = 'alloy';
 const BACKEND_LOG_POLL_INTERVAL_MS = 1500;
+const LIVE_MEMORIZATION_STATE_POLL_INTERVAL_MS = 350;
 const ICE_GATHERING_TIMEOUT_MS = 1500;
 const REHEARSAL_PREFERENCES_STORAGE_KEY = 'rehearsal_preferences';
 
@@ -265,6 +277,7 @@ export default function LiveMemorizationPage() {
   );
   const [remoteAudioAttached, setRemoteAudioAttached] = useState(false);
   const [remoteAudioPlaying, setRemoteAudioPlaying] = useState(false);
+  const [coachAudioPlaying, setCoachAudioPlaying] = useState(false);
   const [activeResponseId, setActiveResponseId] = useState<string | null>(null);
   const [notes, setNotes] = useState('');
   const [localLogs, setLocalLogs] = useState<DebugLogEntry[]>([]);
@@ -277,11 +290,19 @@ export default function LiveMemorizationPage() {
   const remoteStreamRef = useRef<MediaStream | null>(null);
   const activeBackendBaseUrlRef = useRef<string | null>(null);
   const lastServerSeqRef = useRef(0);
+  const lastSpeechSeqRef = useRef(0);
   const serverLogPollIntervalRef = useRef<number | null>(null);
+  const liveMemorizationStatePollIntervalRef = useRef<number | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const lastBackendPollErrorRef = useRef<string | null>(null);
   const isStartingSessionRef = useRef(false);
   const activeResponseIdRef = useRef<string | null>(null);
+  const speechQueueRef = useRef<LiveMemorizationSpeechEvent[]>([]);
+  const speechAudioCacheRef = useRef<Map<number, Blob>>(new Map());
+  const speechAudioFetchRef = useRef<Map<number, Promise<Blob>>>(new Map());
+  const currentSpeechRef = useRef<LiveMemorizationSpeechEvent | null>(null);
+  const currentSpeechAbortControllerRef = useRef<AbortController | null>(null);
+  const isDrainingSpeechQueueRef = useRef(false);
 
   const normalizedBackendUrl = useMemo(
     () => normalizeRealtimeCallLabBackendUrl(backendUrlInput),
@@ -329,8 +350,8 @@ export default function LiveMemorizationPage() {
       'Backend-owned loop:',
       '- Server VAD commits each spoken turn without creating an automatic model reply.',
       '- Backend transcription is checked against the next expected line deterministically.',
-      '- Partner cues, retries, reveals, and continue prompts are queued server-side one at a time.',
-      '- The realtime model is used as a voice renderer, not as the authority for script progress.',
+      '- Partner cues, retries, reveals, and continue prompts are emitted server-side as exact speech events.',
+      '- Exact spoken output is rendered through backend TTS, not by asking the realtime model to improvise.',
     ].join('\n');
   }, [memorizationOptions]);
   const canStartSession = Boolean(memorizationOptions && normalizedBackendUrl);
@@ -355,6 +376,11 @@ export default function LiveMemorizationPage() {
       window.clearInterval(serverLogPollIntervalRef.current);
       serverLogPollIntervalRef.current = null;
     }
+
+    if (liveMemorizationStatePollIntervalRef.current !== null) {
+      window.clearInterval(liveMemorizationStatePollIntervalRef.current);
+      liveMemorizationStatePollIntervalRef.current = null;
+    }
   }, []);
 
   const appendServerLogs = useCallback((incomingLogs: RealtimeServerLogEntry[]) => {
@@ -366,6 +392,154 @@ export default function LiveMemorizationPage() {
     lastServerSeqRef.current = freshLogs[freshLogs.length - 1].seq;
     setServerLogs((entries) => [...entries, ...freshLogs]);
   }, []);
+
+  const fetchSpeechAudio = useCallback(
+    async (speechEvent: LiveMemorizationSpeechEvent): Promise<Blob> => {
+      const cachedAudio = speechAudioCacheRef.current.get(speechEvent.seq);
+      if (cachedAudio) {
+        return cachedAudio;
+      }
+
+      const inFlightRequest = speechAudioFetchRef.current.get(speechEvent.seq);
+      if (inFlightRequest) {
+        return inFlightRequest;
+      }
+
+      const activeBackendBaseUrl = activeBackendBaseUrlRef.current;
+      const activeSessionId = sessionIdRef.current;
+      if (!activeBackendBaseUrl || !activeSessionId) {
+        throw new Error('Live memorization session is not ready for backend speech audio.');
+      }
+
+      const requestPromise = (async () => {
+        const response = await fetch(
+          `${activeBackendBaseUrl}/api/realtime-webrtc/sessions/${encodeURIComponent(
+            activeSessionId,
+          )}/live-memorization/speech/${speechEvent.seq}/audio`,
+        );
+
+        if (!response.ok) {
+          throw new Error(await readResponseErrorMessage(response));
+        }
+
+        const audioBlob = await response.blob();
+        speechAudioCacheRef.current.set(speechEvent.seq, audioBlob);
+        return audioBlob;
+      })();
+
+      speechAudioFetchRef.current.set(speechEvent.seq, requestPromise);
+
+      try {
+        return await requestPromise;
+      } finally {
+        speechAudioFetchRef.current.delete(speechEvent.seq);
+      }
+    },
+    [],
+  );
+
+  const interruptCoachAudioPlayback = useCallback(
+    (reason: string) => {
+      const currentSpeech = currentSpeechRef.current;
+      const abortController = currentSpeechAbortControllerRef.current;
+
+      if (!currentSpeech || !abortController) {
+        return;
+      }
+
+      addLocalLog(
+        'Coach Audio Interrupted',
+        `seq=${currentSpeech.seq} | purpose=${currentSpeech.purpose} | reason=${reason}`,
+      );
+      abortController.abort();
+      currentSpeechAbortControllerRef.current = null;
+    },
+    [addLocalLog],
+  );
+
+  const drainSpeechQueue = useCallback(async () => {
+    if (isDrainingSpeechQueueRef.current) {
+      return;
+    }
+
+    isDrainingSpeechQueueRef.current = true;
+
+    try {
+      while (speechQueueRef.current.length > 0) {
+        const speechEvent = speechQueueRef.current.shift();
+        if (!speechEvent) {
+          continue;
+        }
+
+        const abortController = new AbortController();
+        currentSpeechRef.current = speechEvent;
+        currentSpeechAbortControllerRef.current = abortController;
+        setCoachAudioPlaying(true);
+        addLocalLog(
+          'Coach Audio Started',
+          `seq=${speechEvent.seq} | purpose=${speechEvent.purpose}`,
+        );
+
+        try {
+          const audioBlob = await fetchSpeechAudio(speechEvent);
+          await playAudioBlob(audioBlob, {
+            signal: abortController.signal,
+          });
+          addLocalLog(
+            'Coach Audio Finished',
+            `seq=${speechEvent.seq} | purpose=${speechEvent.purpose}`,
+          );
+        } catch (error) {
+          if (!(error instanceof Error && error.name === 'AbortError')) {
+            addLocalLog(
+              'Coach Audio Failed',
+              `seq=${speechEvent.seq} | ${
+                error instanceof Error ? error.message : 'Unknown coach-audio error'
+              }`,
+            );
+          }
+        } finally {
+          if (currentSpeechRef.current?.seq === speechEvent.seq) {
+            currentSpeechRef.current = null;
+          }
+
+          if (currentSpeechAbortControllerRef.current === abortController) {
+            currentSpeechAbortControllerRef.current = null;
+          }
+
+          setCoachAudioPlaying(false);
+        }
+      }
+    } finally {
+      isDrainingSpeechQueueRef.current = false;
+    }
+  }, [addLocalLog, fetchSpeechAudio]);
+
+  const appendSpeechEvents = useCallback(
+    (incomingSpeechEvents: LiveMemorizationSpeechEvent[]) => {
+      const freshSpeechEvents = incomingSpeechEvents.filter(
+        (event) => event.seq > lastSpeechSeqRef.current,
+      );
+
+      if (freshSpeechEvents.length === 0) {
+        return;
+      }
+
+      lastSpeechSeqRef.current = freshSpeechEvents[freshSpeechEvents.length - 1].seq;
+      speechQueueRef.current.push(...freshSpeechEvents);
+
+      for (const speechEvent of freshSpeechEvents) {
+        addLocalLog(
+          'Backend Speech Received',
+          `seq=${speechEvent.seq} | purpose=${speechEvent.purpose} | text=${speechEvent.text}`,
+        );
+        void fetchSpeechAudio(speechEvent);
+      }
+
+      void drainSpeechQueue();
+    },
+    [addLocalLog, drainSpeechQueue, fetchSpeechAudio],
+  );
 
   const fetchServerLogs = useCallback(async () => {
     const activeBackendBaseUrl = activeBackendBaseUrlRef.current;
@@ -417,17 +591,76 @@ export default function LiveMemorizationPage() {
     }
   }, [addLocalLog, appendServerLogs, status]);
 
+  const fetchLiveMemorizationState = useCallback(async () => {
+    const activeBackendBaseUrl = activeBackendBaseUrlRef.current;
+    const activeSessionId = sessionIdRef.current;
+
+    if (!activeBackendBaseUrl || !activeSessionId) {
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        `${activeBackendBaseUrl}/api/realtime-webrtc/sessions/${encodeURIComponent(
+          activeSessionId,
+        )}/live-memorization/state?afterSpeechSeq=${lastSpeechSeqRef.current}`,
+      );
+
+      if (!response.ok) {
+        throw new Error(await readResponseErrorMessage(response));
+      }
+
+      const payload = (await response.json()) as {
+        callId?: string | null;
+        speech?: LiveMemorizationSpeechEvent[];
+        status?: string;
+      };
+
+      lastBackendPollErrorRef.current = null;
+      if (typeof payload.callId === 'string') {
+        setCallId(payload.callId);
+      }
+
+      appendSpeechEvents(payload.speech ?? []);
+
+      if (payload.status === 'error' && status === 'connected') {
+        setStatus('error');
+        setErrorMessage(
+          'The backend session reported an error. Export the memorization report for details.',
+        );
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown backend state polling error';
+
+      if (lastBackendPollErrorRef.current === message) {
+        return;
+      }
+
+      lastBackendPollErrorRef.current = message;
+      addLocalLog('Backend State Poll Failed', message);
+    }
+  }, [addLocalLog, appendSpeechEvents, status]);
+
   const startServerLogPolling = useCallback(() => {
     clearServerLogPolling();
     void fetchServerLogs();
+    void fetchLiveMemorizationState();
     serverLogPollIntervalRef.current = window.setInterval(() => {
       void fetchServerLogs();
     }, BACKEND_LOG_POLL_INTERVAL_MS);
-  }, [clearServerLogPolling, fetchServerLogs]);
+    liveMemorizationStatePollIntervalRef.current = window.setInterval(() => {
+      void fetchLiveMemorizationState();
+    }, LIVE_MEMORIZATION_STATE_POLL_INTERVAL_MS);
+  }, [clearServerLogPolling, fetchLiveMemorizationState, fetchServerLogs]);
 
   const cleanupActiveSession = useCallback(
     async (options?: { notifyBackend?: boolean }) => {
       clearServerLogPolling();
+      interruptCoachAudioPlayback('session-cleanup');
+      speechQueueRef.current = [];
+      speechAudioCacheRef.current.clear();
+      speechAudioFetchRef.current.clear();
+      lastSpeechSeqRef.current = 0;
 
       const activeBackendBaseUrl = activeBackendBaseUrlRef.current;
       const activeSessionId = sessionIdRef.current;
@@ -503,14 +736,16 @@ export default function LiveMemorizationPage() {
 
       setRemoteAudioAttached(false);
       setRemoteAudioPlaying(false);
+      setCoachAudioPlaying(false);
       setActiveResponseId(null);
 
       activeBackendBaseUrlRef.current = null;
       sessionIdRef.current = null;
+      currentSpeechRef.current = null;
       setSessionId(null);
       setCallId(null);
     },
-    [addLocalLog, clearServerLogPolling, syncPeerConnectionSnapshot],
+    [addLocalLog, clearServerLogPolling, interruptCoachAudioPlayback, syncPeerConnectionSnapshot],
   );
 
   const checkBackendHealth = useCallback(async () => {
@@ -626,6 +861,7 @@ export default function LiveMemorizationPage() {
             : successDescription,
         });
         void fetchServerLogs();
+        void fetchLiveMemorizationState();
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown control-command error';
         addLocalLog('Control Command Failed', `${buttonLabel} | ${message}`);
@@ -636,7 +872,7 @@ export default function LiveMemorizationPage() {
         });
       }
     },
-    [addLocalLog, fetchServerLogs, toast],
+    [addLocalLog, fetchLiveMemorizationState, fetchServerLogs, toast],
   );
 
   const handleStartSession = useCallback(async () => {
@@ -672,8 +908,10 @@ export default function LiveMemorizationPage() {
     setErrorMessage(null);
     setRemoteAudioAttached(false);
     setRemoteAudioPlaying(false);
+    setCoachAudioPlaying(false);
     setServerLogs([]);
     lastServerSeqRef.current = 0;
+    lastSpeechSeqRef.current = 0;
     lastBackendPollErrorRef.current = null;
     addLocalLog(
       'Memorization Session Start Requested',
@@ -684,6 +922,8 @@ export default function LiveMemorizationPage() {
       await cleanupActiveSession({ notifyBackend: true });
       await capturePwaRuntimeDiagnostics(APP_VERSION, 'Live Memorization Start Snapshot', true);
       await requestServiceWorkerDebugSnapshot();
+      await primeAudioPlayback();
+      addLocalLog('Coach Audio Ready', 'Local playback primed for exact backend speech');
 
       setStatus('requesting-mic');
       const localStream = await navigator.mediaDevices.getUserMedia({
@@ -745,12 +985,6 @@ export default function LiveMemorizationPage() {
         const audioElement = audioRef.current;
         if (audioElement) {
           audioElement.srcObject = remoteStream;
-          void audioElement.play().catch((error) => {
-            addLocalLog(
-              'Remote Audio Play Failed',
-              error instanceof Error ? error.message : 'Unknown remote-audio play error',
-            );
-          });
         }
       });
 
@@ -775,6 +1009,14 @@ export default function LiveMemorizationPage() {
         try {
           const payload = JSON.parse(String(event.data)) as unknown;
           addLocalLog('Realtime Client Event', summarizeRealtimeEvent(payload));
+
+          if (
+            payload &&
+            typeof payload === 'object' &&
+            (payload as { type?: string }).type === 'input_audio_buffer.speech_started'
+          ) {
+            interruptCoachAudioPlayback('microphone-activity');
+          }
 
           const lifecycleUpdate = getRealtimeResponseLifecycleUpdate(payload);
           if (lifecycleUpdate?.state === 'started') {
@@ -854,7 +1096,7 @@ export default function LiveMemorizationPage() {
       setStatus('connected');
       toast({
         title: 'Live memorization connected',
-        description: 'The voice rehearsal is live. Speak naturally and let the script drive.',
+        description: 'The backend now checks lines and plays exact cues through deterministic TTS.',
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown realtime-session error';
@@ -873,6 +1115,7 @@ export default function LiveMemorizationPage() {
   }, [
     addLocalLog,
     cleanupActiveSession,
+    interruptCoachAudioPlayback,
     memorizationOptions,
     normalizedBackendUrl,
     startServerLogPolling,
@@ -916,6 +1159,7 @@ export default function LiveMemorizationPage() {
       dataChannelState,
       remoteAudioAttached,
       remoteAudioPlaying,
+      coachAudioPlaying,
       activeResponseId,
       notes,
       localLogs,
@@ -943,6 +1187,7 @@ export default function LiveMemorizationPage() {
     addLocalLog,
     backendUrlInput,
     callId,
+    coachAudioPlaying,
     clampedMaxAttemptsPerLine,
     clampedStartLineNumber,
     connectionState,
@@ -980,6 +1225,7 @@ export default function LiveMemorizationPage() {
       dataChannelState,
       remoteAudioAttached,
       remoteAudioPlaying,
+      coachAudioPlaying,
       activeResponseId,
       notes,
       localLogs,
@@ -993,6 +1239,7 @@ export default function LiveMemorizationPage() {
     addLocalLog,
     backendUrlInput,
     callId,
+    coachAudioPlaying,
     clampedMaxAttemptsPerLine,
     clampedStartLineNumber,
     connectionState,
@@ -1029,6 +1276,7 @@ export default function LiveMemorizationPage() {
       dataChannelState,
       remoteAudioAttached,
       remoteAudioPlaying,
+      coachAudioPlaying,
       activeResponseId,
       notes,
       localLogs,
@@ -1046,6 +1294,7 @@ export default function LiveMemorizationPage() {
     addLocalLog,
     backendUrlInput,
     callId,
+    coachAudioPlaying,
     clampedMaxAttemptsPerLine,
     clampedStartLineNumber,
     connectionState,
@@ -1198,7 +1447,7 @@ export default function LiveMemorizationPage() {
 
   return (
     <div data-testid="live-memorization-page" className="min-h-screen bg-background text-foreground">
-      <audio ref={audioRef} autoPlay playsInline className="hidden" />
+      <audio ref={audioRef} playsInline className="hidden" />
 
       <header className="border-b border-border/60 bg-background/95 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
@@ -1208,7 +1457,7 @@ export default function LiveMemorizationPage() {
             </p>
             <h1 className="text-2xl font-semibold tracking-tight">Realtime Script Coach</h1>
             <p className="text-sm text-muted-foreground">
-              First integrated version for testing voice-based memorization inside the app.
+              Hybrid WebRTC plus backend TTS flow for stricter, line-locked memorization.
             </p>
           </div>
 
@@ -1331,11 +1580,11 @@ export default function LiveMemorizationPage() {
             <CardContent className="space-y-4">
               <div className="flex flex-wrap gap-2">
                 <Badge variant={getStatusVariant(status)}>{status}</Badge>
-                <Badge variant={remoteAudioPlaying ? 'default' : 'outline'}>
-                  audio {remoteAudioPlaying ? 'playing' : 'idle'}
+                <Badge variant={coachAudioPlaying ? 'default' : 'outline'}>
+                  coach audio {coachAudioPlaying ? 'playing' : 'idle'}
                 </Badge>
-                <Badge variant={activeResponseId ? 'secondary' : 'outline'}>
-                  {activeResponseId ? 'assistant busy' : 'assistant idle'}
+                <Badge variant={remoteAudioAttached ? 'secondary' : 'outline'}>
+                  rtc stream {remoteAudioAttached ? 'attached' : 'idle'}
                 </Badge>
               </div>
 
@@ -1575,6 +1824,7 @@ export default function LiveMemorizationPage() {
                   dataChannelState,
                   remoteAudioAttached,
                   remoteAudioPlaying,
+                  coachAudioPlaying,
                   activeResponseId,
                   notes,
                   localLogs,

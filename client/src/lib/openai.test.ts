@@ -141,6 +141,25 @@ test('playAudioBlob reuses the primed audio element', async () => {
   assert.equal(MockAudio.instances[0].playCalls, 2);
 });
 
+test('playAudioBlob aborts cleanly when playback is interrupted', async () => {
+  MockAudio.mode = 'pending';
+  const abortController = new AbortController();
+  const playbackPromise = playAudioBlob(new Blob(['audio']), {
+    signal: abortController.signal,
+  });
+
+  abortController.abort();
+
+  await assert.rejects(() => playbackPromise, (error: unknown) => {
+    assert.ok(error instanceof Error);
+    assert.equal(error.name, 'AbortError');
+    return true;
+  });
+
+  assert.equal(MockAudio.instances.length, 1);
+  assert.equal(MockAudio.instances[0].currentTime, 0);
+});
+
 test('playAudioBlob clears priming so a user gesture can re-prime after autoplay is blocked', async () => {
   await primeAudioPlayback();
 
