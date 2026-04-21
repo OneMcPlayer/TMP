@@ -12,12 +12,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
 import { buildAppRouteHref } from '@/lib/app-route';
 import {
-  buildLiveMemorizationContinuePrompt,
-  buildLiveMemorizationGreetingPrompt,
-  buildLiveMemorizationInstructions,
   buildLiveMemorizationPreviewLines,
-  buildLiveMemorizationRepeatPrompt,
-  buildLiveMemorizationRevealPrompt,
   clampLiveMemorizationAttempts,
   clampLiveMemorizationStartLine,
   serializeLiveMemorizationReport,
@@ -83,6 +78,7 @@ interface RealtimeCallResponse {
   answerSdp: string;
   callId: string | null;
   model: string;
+  mode?: string;
   sessionId: string;
   voice: string;
 }
@@ -316,18 +312,27 @@ export default function LiveMemorizationPage() {
       startLineNumber: clampedStartLineNumber,
     };
   }, [clampedMaxAttemptsPerLine, clampedStartLineNumber, script, selectedCharacter]);
-  const generatedInstructions = useMemo(
-    () => (memorizationOptions ? buildLiveMemorizationInstructions(memorizationOptions) : ''),
-    [memorizationOptions],
-  );
-  const generatedGreetingPrompt = useMemo(
-    () => (memorizationOptions ? buildLiveMemorizationGreetingPrompt(memorizationOptions) : ''),
-    [memorizationOptions],
-  );
   const previewLines = useMemo(
     () => (memorizationOptions ? buildLiveMemorizationPreviewLines(memorizationOptions, 14) : []),
     [memorizationOptions],
   );
+  const deterministicPlanSummary = useMemo(() => {
+    if (!memorizationOptions) {
+      return '';
+    }
+
+    return [
+      `Character under rehearsal: ${memorizationOptions.selectedCharacter}`,
+      `Starting line: ${memorizationOptions.startLineNumber}`,
+      `Max attempts before reveal: ${memorizationOptions.maxAttemptsPerLine}`,
+      '',
+      'Backend-owned loop:',
+      '- Server VAD commits each spoken turn without creating an automatic model reply.',
+      '- Backend transcription is checked against the next expected line deterministically.',
+      '- Partner cues, retries, reveals, and continue prompts are queued server-side one at a time.',
+      '- The realtime model is used as a voice renderer, not as the authority for script progress.',
+    ].join('\n');
+  }, [memorizationOptions]);
   const canStartSession = Boolean(memorizationOptions && normalizedBackendUrl);
 
   const addLocalLog = useCallback((event: string, details?: string) => {
@@ -570,16 +575,16 @@ export default function LiveMemorizationPage() {
     }
   }, [addLocalLog, normalizedBackendUrl, toast]);
 
-  const sendControlPrompt = useCallback(
-    (prompt: string, buttonLabel: string, successDescription: string) => {
-      const dataChannel = dataChannelRef.current;
-      const trimmedPrompt = prompt.trim();
+  const sendControlCommand = useCallback(
+    async (
+      command: 'continue' | 'repeat' | 'reveal',
+      buttonLabel: string,
+      successDescription: string,
+    ) => {
+      const activeBackendBaseUrl = activeBackendBaseUrlRef.current;
+      const activeSessionId = sessionIdRef.current;
 
-      if (!trimmedPrompt) {
-        return;
-      }
-
-      if (!dataChannel || dataChannel.readyState !== 'open') {
+      if (!activeBackendBaseUrl || !activeSessionId) {
         toast({
           title: 'Session not ready',
           description: 'Start the live memorization session first.',
@@ -588,33 +593,50 @@ export default function LiveMemorizationPage() {
         return;
       }
 
-      if (activeResponseIdRef.current) {
-        const message = 'Wait for the current spoken response to finish before sending another cue.';
-        addLocalLog('Control Prompt Blocked', `${buttonLabel} | active=${activeResponseIdRef.current}`);
-        toast({
-          title: 'Assistant is still speaking',
-          description: message,
-        });
-        return;
-      }
-
-      dataChannel.send(
-        JSON.stringify({
-          type: 'response.create',
-          response: {
-            output_modalities: ['audio'],
-            instructions: trimmedPrompt,
+      try {
+        const response = await fetch(
+          `${activeBackendBaseUrl}/api/realtime-webrtc/sessions/${encodeURIComponent(
+            activeSessionId,
+          )}/live-memorization/control`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ command }),
           },
-        }),
-      );
+        );
 
-      addLocalLog('Control Prompt Sent', `${buttonLabel} | ${trimmedPrompt}`);
-      toast({
-        title: buttonLabel,
-        description: successDescription,
-      });
+        if (!response.ok) {
+          throw new Error(await readResponseErrorMessage(response));
+        }
+
+        const payload = (await response.json()) as {
+          queuedResponses?: number;
+        };
+
+        addLocalLog(
+          'Control Command Sent',
+          `${buttonLabel} | command=${command} | queued=${payload.queuedResponses ?? 0}`,
+        );
+        toast({
+          title: buttonLabel,
+          description: activeResponseIdRef.current
+            ? `${successDescription} It was queued safely on the backend.`
+            : successDescription,
+        });
+        void fetchServerLogs();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown control-command error';
+        addLocalLog('Control Command Failed', `${buttonLabel} | ${message}`);
+        toast({
+          title: `${buttonLabel} failed`,
+          description: message,
+          variant: 'destructive',
+        });
+      }
     },
-    [addLocalLog, toast],
+    [addLocalLog, fetchServerLogs, toast],
   );
 
   const handleStartSession = useCallback(async () => {
@@ -793,16 +815,17 @@ export default function LiveMemorizationPage() {
       );
       addLocalLog('ICE Gathering Wait Finished', `outcome=${iceGatheringOutcome}`);
 
-      const response = await fetch(`${normalizedBackendUrl}/api/realtime-webrtc/calls`, {
+      const response = await fetch(`${normalizedBackendUrl}/api/realtime-webrtc/live-memorization/calls`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          greetingPrompt: generatedGreetingPrompt,
-          instructions: generatedInstructions,
+          maxAttemptsPerLine: memorizationOptions.maxAttemptsPerLine,
           offerSdp: peerConnection.localDescription?.sdp ?? offer.sdp ?? '',
-          turnDetection: 'server_vad',
+          script: memorizationOptions.script,
+          selectedCharacter: memorizationOptions.selectedCharacter,
+          startLineNumber: memorizationOptions.startLineNumber,
           voice: DEFAULT_VOICE,
         }),
       });
@@ -818,7 +841,7 @@ export default function LiveMemorizationPage() {
       setCallId(payload.callId);
       addLocalLog(
         'Live Memorization Call Created',
-        `session=${payload.sessionId} | call=${payload.callId ?? 'none'} | model=${payload.model}`,
+        `session=${payload.sessionId} | call=${payload.callId ?? 'none'} | model=${payload.model} | mode=${payload.mode ?? 'default'}`,
       );
 
       await peerConnection.setRemoteDescription({
@@ -850,8 +873,6 @@ export default function LiveMemorizationPage() {
   }, [
     addLocalLog,
     cleanupActiveSession,
-    generatedGreetingPrompt,
-    generatedInstructions,
     memorizationOptions,
     normalizedBackendUrl,
     startServerLogPolling,
@@ -1285,7 +1306,7 @@ export default function LiveMemorizationPage() {
               </div>
 
               <div className="rounded-2xl border border-border/60 bg-muted/20 p-4 text-sm text-muted-foreground">
-                <p className="font-medium text-foreground">Voice commands the model should understand</p>
+                <p className="font-medium text-foreground">Voice commands the backend should understand</p>
                 <p className="mt-2">
                   Say <span className="font-medium text-foreground">repeat</span> to hear the cue
                   again, <span className="font-medium text-foreground">skip</span> to move on, or{' '}
@@ -1303,8 +1324,8 @@ export default function LiveMemorizationPage() {
                 Session State
               </CardTitle>
               <CardDescription>
-                Start the realtime coach, then use the quick controls only when the assistant is
-                idle.
+                Start the realtime coach, then let the backend queue and arbitrate every scripted
+                step.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -1393,13 +1414,13 @@ export default function LiveMemorizationPage() {
                   type="button"
                   variant="secondary"
                   onClick={() =>
-                    sendControlPrompt(
-                      buildLiveMemorizationRepeatPrompt(),
+                    void sendControlCommand(
+                      'repeat',
                       'Repeat cue',
                       'The coach was asked to repeat the current scripted cue.',
                     )
                   }
-                  disabled={status !== 'connected' || Boolean(activeResponseId)}
+                  disabled={status !== 'connected'}
                 >
                   <RefreshCw className="mr-2 h-4 w-4" />
                   Repeat Cue
@@ -1409,13 +1430,13 @@ export default function LiveMemorizationPage() {
                   type="button"
                   variant="secondary"
                   onClick={() =>
-                    sendControlPrompt(
-                      buildLiveMemorizationRevealPrompt(),
+                    void sendControlCommand(
+                      'reveal',
                       'Reveal next line',
                       'The coach was asked to reveal the next expected user line once.',
                     )
                   }
-                  disabled={status !== 'connected' || Boolean(activeResponseId)}
+                  disabled={status !== 'connected'}
                 >
                   <Sparkles className="mr-2 h-4 w-4" />
                   Reveal Line
@@ -1425,13 +1446,13 @@ export default function LiveMemorizationPage() {
                   type="button"
                   variant="secondary"
                   onClick={() =>
-                    sendControlPrompt(
-                      buildLiveMemorizationContinuePrompt(),
+                    void sendControlCommand(
+                      'continue',
                       'Continue',
                       'The coach was asked to continue from the current place in the scene.',
                     )
                   }
-                  disabled={status !== 'connected' || Boolean(activeResponseId)}
+                  disabled={status !== 'connected'}
                 >
                   <SkipForward className="mr-2 h-4 w-4" />
                   Continue
@@ -1444,31 +1465,20 @@ export default function LiveMemorizationPage() {
         <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
           <Card>
             <CardHeader>
-              <CardTitle>Generated Coach Instructions</CardTitle>
+              <CardTitle>Backend Guardrails</CardTitle>
               <CardDescription>
-                This is the exact session instruction block sent to the realtime model for the live
-                memorization run.
+                This run is now backend-controlled: the script cursor, retries, reveals, and
+                continue logic all live on the server side.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="live-memorization-greeting">Opening Prompt</Label>
+                <Label htmlFor="live-memorization-guardrails">Deterministic Session Plan</Label>
                 <Textarea
-                  id="live-memorization-greeting"
-                  value={generatedGreetingPrompt}
+                  id="live-memorization-guardrails"
+                  value={deterministicPlanSummary}
                   readOnly
-                  className="min-h-[96px]"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="live-memorization-instructions">Session Instructions</Label>
-                <Textarea
-                  id="live-memorization-instructions"
-                  data-testid="textarea-live-memorization-instructions"
-                  value={generatedInstructions}
-                  readOnly
-                  className="min-h-[340px] font-mono text-xs"
+                  className="min-h-[220px] font-mono text-xs"
                 />
               </div>
             </CardContent>

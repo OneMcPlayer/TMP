@@ -1,33 +1,12 @@
-export interface ScriptLine {
-  character: string;
-  text: string;
-}
+export type {
+  RawScript,
+  RawScriptLine,
+  Script,
+  ScriptLine,
+  WordDiff,
+} from '@shared/rehearsal-core';
 
-export interface RawScriptLine {
-  character?: string;
-  text?: string;
-  speaker?: string;
-  line?: string;
-}
-
-export interface Script {
-  title: string;
-  author?: string;
-  language?: string;
-  lines: ScriptLine[];
-}
-
-export interface RawScript {
-  title: string;
-  author?: string;
-  language?: string;
-  lines: RawScriptLine[];
-}
-
-export interface WordDiff {
-  word: string;
-  status: 'correct' | 'missing' | 'extra';
-}
+import type { WordDiff } from '@shared/rehearsal-core';
 
 export interface LineResult {
   lineIndex: number;
