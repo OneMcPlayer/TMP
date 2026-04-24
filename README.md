@@ -14,6 +14,7 @@ A browser-only rehearsal page for **Finale di partita** by Samuel Beckett. It is
 - Car-mode **screen wake lock** when the browser supports it
 - Debug logs that capture **PWA**, **service worker**, and mobile runtime state
 - A separate **Realtime Browser Lab** route for testing a true browser-call architecture with a local backend
+- A separate **Tap Rehearsal** route for backend-managed rehearsal with hidden user lines and one large line-complete button
 
 ## Car Mode Note
 
@@ -53,6 +54,7 @@ There is now a side experiment for testing whether a true browser `WebRTC` call 
 Browser page:
 
 - `#/realtime-lab`
+- `#/tap-rehearsal` for the stage-style tap prototype
 
 Local backend:
 
@@ -62,6 +64,16 @@ npm run realtime-lab:server
 ```
 
 The backend helper lives in [experiments/realtime-webrtc-lab/README.md](/workspaces/TMP/experiments/realtime-webrtc-lab/README.md). This experiment is intentionally separate from the static GitHub Pages deployment so we can test a backend-assisted call flow without destabilizing the main rehearsal app.
+
+## Tap Rehearsal Prototype
+
+The tap prototype uses the same local realtime backend but changes the rehearsal loop:
+
+- partner lines are spoken automatically
+- user lines are not shown during normal play
+- the browser clears the realtime input buffer at the start of each user turn
+- the user taps one large button after finishing the line
+- wrong lines reveal and speak the correction, then the user can retry or skip
 
 ## Quality Checks
 

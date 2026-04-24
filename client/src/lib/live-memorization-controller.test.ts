@@ -71,6 +71,23 @@ test('failed attempts eventually reveal and advance when the limit is reached', 
   assert.equal(getCurrentLiveMemorizationLine(controller)?.lineNumber, 3);
 });
 
+test('reveal-and-retry mode reveals the expected line without advancing', () => {
+  const controller = buildLiveMemorizationController({
+    maxAttemptsPerLine: 2,
+    script: SCRIPT,
+    selectedCharacter: 'BOB',
+    startLineNumber: 2,
+    wrongAttemptBehavior: 'reveal-and-retry',
+  });
+
+  const outcome = processLiveMemorizationTranscript(controller, 'Completely wrong');
+
+  assert.equal(outcome.type, 'reveal-and-retry');
+  assert.equal(outcome.revealText, 'My cue line.');
+  assert.equal(outcome.attempts, 1);
+  assert.equal(getCurrentLiveMemorizationLine(controller)?.lineNumber, 2);
+});
+
 test('voice control commands are detected and can advance the cursor', () => {
   const controller = buildLiveMemorizationController({
     maxAttemptsPerLine: 3,

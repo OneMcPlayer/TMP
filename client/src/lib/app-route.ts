@@ -1,8 +1,14 @@
-export type AppRoute = 'rehearsal' | 'audio-lab' | 'realtime-lab' | 'live-memorization';
+export type AppRoute =
+  | 'rehearsal'
+  | 'audio-lab'
+  | 'realtime-lab'
+  | 'live-memorization'
+  | 'tap-rehearsal';
 
 const AUDIO_LAB_HASHES = new Set(['#audio-lab', '#/audio-lab']);
 const REALTIME_LAB_HASHES = new Set(['#realtime-lab', '#/realtime-lab']);
 const LIVE_MEMORIZATION_HASHES = new Set(['#live-memorization', '#/live-memorization']);
+const TAP_REHEARSAL_HASHES = new Set(['#tap-rehearsal', '#/tap-rehearsal']);
 const REHEARSAL_HASHES = new Set(['', '#', '#/', '#rehearsal', '#/rehearsal']);
 
 export function getAppRouteFromHash(hash: string): AppRoute {
@@ -20,6 +26,10 @@ export function getAppRouteFromHash(hash: string): AppRoute {
     return 'live-memorization';
   }
 
+  if (TAP_REHEARSAL_HASHES.has(normalizedHash)) {
+    return 'tap-rehearsal';
+  }
+
   if (REHEARSAL_HASHES.has(normalizedHash)) {
     return 'rehearsal';
   }
@@ -34,6 +44,10 @@ export function getAppRouteFromHash(hash: string): AppRoute {
 
   if (normalizedHash.includes('live-memorization')) {
     return 'live-memorization';
+  }
+
+  if (normalizedHash.includes('tap-rehearsal')) {
+    return 'tap-rehearsal';
   }
 
   return 'rehearsal';
@@ -58,6 +72,10 @@ export function buildAppRouteHref(route: AppRoute): string {
 
   if (route === 'live-memorization') {
     return '#/live-memorization';
+  }
+
+  if (route === 'tap-rehearsal') {
+    return '#/tap-rehearsal';
   }
 
   return '#/';

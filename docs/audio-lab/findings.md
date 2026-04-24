@@ -31,6 +31,7 @@
 - Despite that invalid parameter error, the session still produced real assistant audio and transcript deltas after speech was detected, which strongly suggests the backend-assisted browser-call architecture is viable enough to keep pursuing.
 - The exported April 17, 2026 report came from Safari in browser-tab mode, not standalone PWA mode, and the page was not under an active service worker at the time. That means this result proves the architecture in ordinary mobile Safari first; standalone-PWA reliability still needs to be tested separately.
 - The same report also showed a later `Backend Log Poll Failed — Load failed` event after report export, which looks more like a transient fetch/polling issue during or after the session than a call-establishment failure.
+- On April 24, 2026, the repo gained a separate `#/tap-rehearsal` prototype that keeps the script cursor and correction policy on the backend, hides normal user lines, disables automatic VAD commits, and lets the user tap once when their line is complete.
 
 ## Working assumptions
 
@@ -60,6 +61,7 @@
 - If that browser-call spike behaves better, is the next step a minimal server-backed rehearsal prototype rather than one more attempt to force the static PWA path into call-like behavior?
 - Once the obsolete `response.modalities` parameter is removed, does the same iPhone Safari browser-call flow remain stable without protocol errors across repeated prompts and longer conversations?
 - After the browser-tab success on April 17, 2026, how much of that same behavior survives when the exact same backend-assisted call flow is retried in standalone PWA mode?
+- Does the `#/tap-rehearsal` manual-commit flow produce cleaner user-line boundaries than server VAD while still keeping the microphone and playback reliable on iPhone Safari and standalone PWA?
 
 ## How to use new evidence
 

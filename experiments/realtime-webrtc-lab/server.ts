@@ -48,6 +48,18 @@ type SessionSpeechEvent = {
   audioContentType: string | null;
 };
 
+type LiveMemorizationTurnCommitMode = 'server_vad' | 'manual';
+type LiveMemorizationCorrectionMode = 'brief-retry' | 'reveal-and-retry';
+
+type LiveMemorizationCorrection = {
+  accuracy: number;
+  attempts: number;
+  expectedText: string;
+  lineNumber: number;
+  spokenText: string;
+  timestamp: string;
+};
+
 type BaseRealtimeLabSession = {
   id: string;
   createdAt: number;
@@ -69,11 +81,14 @@ type DefaultRealtimeLabSession = BaseRealtimeLabSession & {
 };
 
 type LiveMemorizationState = {
+  correctionMode: LiveMemorizationCorrectionMode;
   controller: LiveMemorizationController;
+  lastCorrection: LiveMemorizationCorrection | null;
   script: Script;
   selectedCharacter: string;
   committedItemIds: string[];
   transcriptsByItemId: Map<string, string>;
+  turnCommitMode: LiveMemorizationTurnCommitMode;
 };
 
 type LiveMemorizationRealtimeLabSession = BaseRealtimeLabSession & {
@@ -92,12 +107,14 @@ type CreateCallBody = {
 };
 
 type CreateLiveMemorizationCallBody = {
+  correctionMode?: LiveMemorizationCorrectionMode;
   offerSdp?: string;
   voice?: string;
   script?: RawScript;
   selectedCharacter?: string;
   startLineNumber?: number;
   maxAttemptsPerLine?: number;
+  turnCommitMode?: LiveMemorizationTurnCommitMode;
 };
 
 type LiveMemorizationControlBody = {
@@ -199,11 +216,13 @@ function createDefaultSession(model: string, voice: string): DefaultRealtimeLabS
 }
 
 function createLiveMemorizationSession(options: {
+  correctionMode: LiveMemorizationCorrectionMode;
   maxAttemptsPerLine: number;
   model: string;
   script: Script;
   selectedCharacter: string;
   startLineNumber: number;
+  turnCommitMode: LiveMemorizationTurnCommitMode;
   voice: string;
 }): LiveMemorizationRealtimeLabSession {
   const session: LiveMemorizationRealtimeLabSession = {
@@ -215,11 +234,18 @@ function createLiveMemorizationSession(options: {
         script: options.script,
         selectedCharacter: options.selectedCharacter,
         startLineNumber: options.startLineNumber,
+        wrongAttemptBehavior:
+          options.correctionMode === 'reveal-and-retry'
+            ? 'reveal-and-retry'
+            : 'reveal-and-advance-after-max',
       }),
+      correctionMode: options.correctionMode,
+      lastCorrection: null,
       script: options.script,
       selectedCharacter: options.selectedCharacter,
       committedItemIds: [],
       transcriptsByItemId: new Map<string, string>(),
+      turnCommitMode: options.turnCommitMode,
     },
   };
 
@@ -324,6 +350,16 @@ function buildLiveMemorizationSessionConfiguration(
   const liveMemorizationState = session.liveMemorization;
   const expectedLine = getUpcomingUserLine(liveMemorizationState.controller)?.speakableText ?? '';
   const language = inferLanguageCode(liveMemorizationState.script.language);
+  const turnDetectionConfiguration =
+    liveMemorizationState.turnCommitMode === 'manual'
+      ? { turn_detection: null }
+      : {
+          turn_detection: {
+            type: 'server_vad',
+            create_response: false,
+            interrupt_response: true,
+          },
+        };
 
   return {
     type: 'realtime',
@@ -345,11 +381,7 @@ function buildLiveMemorizationSessionConfiguration(
             expectedLine,
           ),
         },
-        turn_detection: {
-          type: 'server_vad',
-          create_response: false,
-          interrupt_response: true,
-        },
+        ...turnDetectionConfiguration,
       },
       output: {
         voice: session.voice,
@@ -578,6 +610,7 @@ function queueLiveMemorizationStep(
   reason: 'kickoff' | 'accepted' | 'continue',
 ): void {
   const liveMemorizationController = session.liveMemorization.controller;
+  session.liveMemorization.lastCorrection = null;
   const partnerLines: string[] = [];
 
   while (true) {
@@ -638,6 +671,14 @@ function handleLiveMemorizationControlCommand(
 
   if (command === 'reveal') {
     if (currentLine?.isUserLine) {
+      session.liveMemorization.lastCorrection = {
+        accuracy: 0,
+        attempts: controller.attemptsForCurrentLine,
+        expectedText: currentLine.speakableText,
+        lineNumber: currentLine.lineNumber,
+        spokenText: '',
+        timestamp: formatTimestamp(),
+      };
       enqueueSessionSpeech(session, `Your line is: ${currentLine.speakableText}`, 'reveal');
       return;
     }
@@ -682,6 +723,7 @@ function flushLiveMemorizationTranscriptions(
           'Line Accepted',
           `item=${itemId} | accuracy=${outcome.evaluation.accuracy}% | transcript=${transcript}`,
         );
+        liveMemorizationState.lastCorrection = null;
         queueLiveMemorizationStep(session, 'accepted');
         break;
       case 'retry':
@@ -695,6 +737,27 @@ function flushLiveMemorizationTranscriptions(
           session,
           outcome.attemptsRemaining === 1 ? 'Almost. One more try.' : 'Not yet. Try again.',
           'retry',
+        );
+        break;
+      case 'reveal-and-retry':
+        liveMemorizationState.lastCorrection = {
+          accuracy: outcome.evaluation.accuracy,
+          attempts: outcome.attempts,
+          expectedText: outcome.revealText,
+          lineNumber: getCurrentLiveMemorizationLine(liveMemorizationState.controller)?.lineNumber ?? 0,
+          spokenText: transcript,
+          timestamp: formatTimestamp(),
+        };
+        appendSessionLog(
+          session,
+          'info',
+          'Line Correction Revealed',
+          `item=${itemId} | accuracy=${outcome.evaluation.accuracy}% | attempts=${outcome.attempts} | transcript=${transcript}`,
+        );
+        enqueueSessionSpeech(
+          session,
+          `Your line is: ${outcome.revealText}`,
+          'correction',
         );
         break;
       case 'reveal-and-advance':
@@ -1044,12 +1107,14 @@ app.post('/api/realtime-webrtc/live-memorization/calls', async (req, res) => {
   }
 
   const {
+    correctionMode = 'brief-retry',
     offerSdp,
     voice = DEFAULT_VOICE,
     script: rawScript,
     selectedCharacter,
     startLineNumber = 1,
     maxAttemptsPerLine = 3,
+    turnCommitMode = 'server_vad',
   } = (req.body ?? {}) as CreateLiveMemorizationCallBody;
 
   if (typeof offerSdp !== 'string' || !offerSdp.trim()) {
@@ -1094,11 +1159,14 @@ app.post('/api/realtime-webrtc/live-memorization/calls', async (req, res) => {
   }
 
   const session = createLiveMemorizationSession({
+    correctionMode:
+      correctionMode === 'reveal-and-retry' ? 'reveal-and-retry' : 'brief-retry',
     maxAttemptsPerLine,
     model: DEFAULT_MODEL,
     script,
     selectedCharacter: trimmedCharacter,
     startLineNumber,
+    turnCommitMode: turnCommitMode === 'manual' ? 'manual' : 'server_vad',
     voice,
   });
 
@@ -1106,7 +1174,7 @@ app.post('/api/realtime-webrtc/live-memorization/calls', async (req, res) => {
     session,
     'info',
     'Live Memorization Call Request Received',
-    `voice=${voice} | character=${trimmedCharacter} | startLine=${startLineNumber} | attempts=${maxAttemptsPerLine}`,
+    `voice=${voice} | character=${trimmedCharacter} | startLine=${startLineNumber} | attempts=${maxAttemptsPerLine} | turnCommitMode=${session.liveMemorization.turnCommitMode} | correctionMode=${session.liveMemorization.correctionMode}`,
   );
 
   try {
@@ -1221,9 +1289,18 @@ app.get('/api/realtime-webrtc/sessions/:sessionId/live-memorization/state', (req
 
   res.json({
     callId: session.callId,
+    correction: session.liveMemorization.lastCorrection,
+    currentLine: currentLine
+      ? {
+          character: currentLine.character,
+          isUserLine: currentLine.isUserLine,
+          lineNumber: currentLine.lineNumber,
+        }
+      : null,
     currentLineNumber: currentLine?.lineNumber ?? null,
     speech: buildPublicSpeechEvents(session.speechEvents, safeAfterSpeechSeq),
     status: session.status,
+    turnCommitMode: session.liveMemorization.turnCommitMode,
   });
 });
 

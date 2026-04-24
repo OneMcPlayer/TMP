@@ -5,6 +5,7 @@ import AudioLabPage from "@/pages/audio-lab";
 import LiveMemorizationPage from "@/pages/live-memorization";
 import RealtimeCallLabPage from "@/pages/realtime-call-lab";
 import RehearsalPage from "@/pages/rehearsal";
+import TapRehearsalPage from "@/pages/tap-rehearsal";
 import { useEffect, useState } from "react";
 
 function App() {
@@ -30,6 +31,8 @@ function App() {
         <RealtimeCallLabPage />
       ) : route === "live-memorization" ? (
         <LiveMemorizationPage />
+      ) : route === "tap-rehearsal" ? (
+        <TapRehearsalPage />
       ) : (
         <RehearsalPage />
       )}

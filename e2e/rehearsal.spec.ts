@@ -65,6 +65,18 @@ test.describe('rehearsal browser e2e', () => {
     await expect(page.getByTestId('button-live-memorization-start')).toBeVisible();
   });
 
+  test('opens the tap rehearsal page from the launch screen', async ({ page }) => {
+    await setupRehearsalApp(page, {
+      script: PARTNER_LEAD_SCRIPT,
+      selectedCharacter: 'BOB',
+    });
+
+    await page.getByTestId('button-open-tap-rehearsal').click();
+    await expect(page.getByTestId('tap-rehearsal-page')).toBeVisible();
+    await expect(page.getByText('Stage Mode Prototype')).toBeVisible();
+    await expect(page.getByTestId('button-tap-rehearsal-start')).toBeVisible();
+  });
+
   test('keeps the settings button available on the launch screen', async ({ page }) => {
     await setupRehearsalApp(page, {
       script: PARTNER_LEAD_SCRIPT,

@@ -8,6 +8,9 @@ import {
 } from './rehearsal-core';
 
 export type LiveMemorizationCommand = 'continue' | 'repeat' | 'reveal' | 'skip';
+export type LiveMemorizationWrongAttemptBehavior =
+  | 'reveal-and-advance-after-max'
+  | 'reveal-and-retry';
 
 export interface LiveMemorizationLine {
   lineIndex: number;
@@ -25,6 +28,7 @@ export interface LiveMemorizationController {
   lastSpokenCoachText: string | null;
   lines: LiveMemorizationLine[];
   maxAttemptsPerLine: number;
+  wrongAttemptBehavior: LiveMemorizationWrongAttemptBehavior;
 }
 
 export interface LiveMemorizationAttemptEvaluation {
@@ -39,6 +43,12 @@ export interface LiveMemorizationAttemptEvaluation {
 export type LiveMemorizationTranscriptOutcome =
   | { type: 'accepted'; evaluation: LiveMemorizationAttemptEvaluation }
   | { attemptsRemaining: number; evaluation: LiveMemorizationAttemptEvaluation; type: 'retry' }
+  | {
+      attempts: number;
+      evaluation: LiveMemorizationAttemptEvaluation;
+      revealText: string;
+      type: 'reveal-and-retry';
+    }
   | { evaluation: LiveMemorizationAttemptEvaluation; revealText: string; type: 'reveal-and-advance' }
   | { line: LiveMemorizationLine | null; type: 'control'; command: LiveMemorizationCommand }
   | { reason: string; type: 'ignored' };
@@ -63,6 +73,7 @@ export function buildLiveMemorizationController(options: {
   script: Script;
   selectedCharacter: string;
   startLineNumber: number;
+  wrongAttemptBehavior?: LiveMemorizationWrongAttemptBehavior;
 }): LiveMemorizationController {
   const startLineNumber = clampLiveMemorizationCursor(
     options.startLineNumber,
@@ -91,6 +102,7 @@ export function buildLiveMemorizationController(options: {
     lastSpokenCoachText: null,
     lines,
     maxAttemptsPerLine: Math.max(1, Math.min(Math.floor(options.maxAttemptsPerLine), 5)),
+    wrongAttemptBehavior: options.wrongAttemptBehavior ?? 'reveal-and-advance-after-max',
   };
 }
 
@@ -259,6 +271,15 @@ export function processLiveMemorizationTranscript(
   }
 
   controller.attemptsForCurrentLine += 1;
+
+  if (controller.wrongAttemptBehavior === 'reveal-and-retry') {
+    return {
+      type: 'reveal-and-retry',
+      evaluation,
+      revealText: currentLine.speakableText,
+      attempts: controller.attemptsForCurrentLine,
+    };
+  }
 
   if (controller.attemptsForCurrentLine >= controller.maxAttemptsPerLine) {
     const revealText = currentLine.speakableText;

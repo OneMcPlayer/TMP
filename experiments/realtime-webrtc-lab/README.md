@@ -32,6 +32,7 @@ The default local port is `8787`.
 The matching browser page lives in the main app at:
 
 - `#/realtime-lab`
+- `#/tap-rehearsal`
 
 You can keep the normal Vite app running separately with:
 
@@ -46,6 +47,15 @@ Then point the browser page at:
 Or, when using Codespaces / a forwarded public port:
 
 - `https://<your-codespace>-8787.<forwarding-domain>`
+
+## Tap Rehearsal Route
+
+The `#/tap-rehearsal` route reuses this backend with a stricter rehearsal contract:
+
+- `turnCommitMode: "manual"` disables automatic VAD turn commits
+- the browser sends `input_audio_buffer.clear` when the user turn opens
+- the browser sends `input_audio_buffer.commit` when the user taps the large line-complete button
+- `correctionMode: "reveal-and-retry"` speaks and shows the expected line after a miss without advancing the script
 
 ## Why this exists
 
