@@ -1,4 +1,6 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import express from 'express';
 import WebSocket from 'ws';
 
@@ -132,6 +134,19 @@ type ClientLogsBody = {
   source?: unknown;
 };
 
+type PublicSessionSummary = {
+  callId: string | null;
+  createdAt: string;
+  latestLog: SessionLogEntry | null;
+  logCount: number;
+  mode: RealtimeLabSession['mode'];
+  model: string;
+  selectedCharacter?: string;
+  sessionId: string;
+  status: SessionStatus;
+  voice: string;
+};
+
 const DEFAULT_MODEL = 'gpt-realtime';
 const DEFAULT_TURN_DETECTION: 'disabled' | 'server_vad' = 'server_vad';
 const DEFAULT_VOICE = 'alloy';
@@ -145,6 +160,9 @@ const LIVE_MEMORIZATION_TTS_RESPONSE_FORMAT = 'mp3';
 const MAX_SPEECH_EVENTS_PER_SESSION = 200;
 const MAX_CLIENT_LOG_BATCH_SIZE = 50;
 const MAX_CLIENT_LOG_TEXT_LENGTH = 1200;
+const REALTIME_SESSION_LOG_FILE =
+  process.env.REALTIME_SESSION_LOG_FILE ??
+  path.resolve(process.cwd(), 'output', 'realtime-session-logs.jsonl');
 
 const app = express();
 const sessions = new Map<string, RealtimeLabSession>();
@@ -221,6 +239,53 @@ function appendClientLogEntries(
   }
 
   return acceptedCount;
+}
+
+function buildPublicSessionSummary(session: RealtimeLabSession): PublicSessionSummary {
+  return {
+    callId: session.callId,
+    createdAt: formatTimestamp(new Date(session.createdAt)),
+    latestLog: session.logs[session.logs.length - 1] ?? null,
+    logCount: session.logs.length,
+    mode: session.mode,
+    model: session.model,
+    ...(isLiveMemorizationSession(session)
+      ? { selectedCharacter: session.liveMemorization.selectedCharacter }
+      : {}),
+    sessionId: session.id,
+    status: session.status,
+    voice: session.voice,
+  };
+}
+
+async function persistSessionLogEntry(
+  session: RealtimeLabSession,
+  entry: SessionLogEntry,
+): Promise<void> {
+  const record = {
+    sessionId: session.id,
+    callId: session.callId,
+    createdAt: formatTimestamp(new Date(session.createdAt)),
+    mode: session.mode,
+    model: session.model,
+    status: session.status,
+    voice: session.voice,
+    ...(isLiveMemorizationSession(session)
+      ? { selectedCharacter: session.liveMemorization.selectedCharacter }
+      : {}),
+    log: entry,
+  };
+
+  try {
+    await fs.mkdir(path.dirname(REALTIME_SESSION_LOG_FILE), { recursive: true });
+    await fs.appendFile(
+      REALTIME_SESSION_LOG_FILE,
+      `${JSON.stringify(record)}\n`,
+      'utf8',
+    );
+  } catch {
+    // Persistent logs are a debugging aid; never let file I/O break a live session.
+  }
 }
 
 function summarizeRealtimeEvent(payload: unknown): string {
@@ -338,6 +403,7 @@ function appendSessionLog(
 
   session.nextSeq += 1;
   session.logs = [...session.logs, entry].slice(-MAX_LOGS_PER_SESSION);
+  void persistSessionLogEntry(session, entry);
   return entry;
 }
 
@@ -1057,8 +1123,27 @@ async function connectSidebandSocket(
 app.get('/health', (_req, res) => {
   res.json({
     ok: true,
+    logFile: REALTIME_SESSION_LOG_FILE,
     openAiConfigured: Boolean(OPENAI_API_KEY),
     uptimeSeconds: Math.round(process.uptime()),
+  });
+});
+
+app.get('/api/realtime-webrtc/sessions', (req, res) => {
+  const requestedLimit = Number.parseInt(String(req.query.limit ?? '20'), 10);
+  const limit = Number.isFinite(requestedLimit)
+    ? Math.max(1, Math.min(requestedLimit, 50))
+    : 20;
+  const recentSessions = Array.from(sessions.values())
+    .sort((left, right) => right.createdAt - left.createdAt)
+    .slice(0, limit)
+    .map(buildPublicSessionSummary);
+
+  res.json({
+    count: recentSessions.length,
+    generatedAt: formatTimestamp(),
+    logFile: REALTIME_SESSION_LOG_FILE,
+    sessions: recentSessions,
   });
 });
 

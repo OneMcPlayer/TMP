@@ -4,6 +4,8 @@ import assert from 'node:assert/strict';
 import {
   MAX_REALTIME_CLIENT_LOG_BATCH_SIZE,
   buildRealtimeClientLogsUrl,
+  buildRealtimeSessionLogsUrl,
+  buildRealtimeSessionsUrl,
   postRealtimeClientLogs,
 } from './realtime-client-logs';
 
@@ -11,6 +13,17 @@ test('buildRealtimeClientLogsUrl targets the session client log endpoint', () =>
   assert.equal(
     buildRealtimeClientLogsUrl('http://127.0.0.1:8787', 'session 1'),
     'http://127.0.0.1:8787/api/realtime-webrtc/sessions/session%201/client-logs',
+  );
+});
+
+test('session helper URLs support recovering backend logs without client state', () => {
+  assert.equal(
+    buildRealtimeSessionsUrl('https://backend.example'),
+    'https://backend.example/api/realtime-webrtc/sessions',
+  );
+  assert.equal(
+    buildRealtimeSessionLogsUrl('https://backend.example', 'session 1'),
+    'https://backend.example/api/realtime-webrtc/sessions/session%201/logs',
   );
 });
 

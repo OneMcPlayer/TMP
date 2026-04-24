@@ -77,6 +77,8 @@ The tap prototype uses the same local realtime backend but changes the rehearsal
 - wrong lines reveal and speak the correction, then the user can retry or skip
 
 Realtime backend sessions also receive client debug logs automatically from the browser. Use the backend session logs when sharing a run; copying the client-side report is only needed as a fallback.
+If the page no longer shows the session ID after cleanup, open `/api/realtime-webrtc/sessions` on the backend to find recent sessions and their log URLs.
+The local backend also writes session logs to `output/realtime-session-logs.jsonl` for direct server-side inspection.
 
 ## Quality Checks
 

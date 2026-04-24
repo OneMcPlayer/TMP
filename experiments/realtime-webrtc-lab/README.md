@@ -68,6 +68,16 @@ Those client events are folded into the same session log stream returned by:
 
 - `/api/realtime-webrtc/sessions/:sessionId/logs`
 
+If the client no longer shows the session ID, use the recent-session index:
+
+- `/api/realtime-webrtc/sessions`
+
+The backend also appends every session log entry to:
+
+- `output/realtime-session-logs.jsonl`
+
+Override that location with `REALTIME_SESSION_LOG_FILE=/path/to/file.jsonl` when starting the backend.
+
 That makes a backend log export useful without manually copying the client report after every run.
 
 ## Why this exists

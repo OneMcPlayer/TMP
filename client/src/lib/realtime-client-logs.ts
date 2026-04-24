@@ -19,6 +19,17 @@ export function buildRealtimeClientLogsUrl(
   )}/client-logs`;
 }
 
+export function buildRealtimeSessionsUrl(backendBaseUrl: string): string {
+  return `${backendBaseUrl}/api/realtime-webrtc/sessions`;
+}
+
+export function buildRealtimeSessionLogsUrl(
+  backendBaseUrl: string,
+  sessionId: string,
+): string {
+  return `${backendBaseUrl}/api/realtime-webrtc/sessions/${encodeURIComponent(sessionId)}/logs`;
+}
+
 export async function postRealtimeClientLogs({
   backendBaseUrl,
   entries,

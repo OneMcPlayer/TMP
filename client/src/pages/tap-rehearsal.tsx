@@ -14,6 +14,10 @@ import { buildAppRouteHref } from '@/lib/app-route';
 import { appendDebugLogEntry, createDebugLogEntry, serializeDebugLogEntries, type DebugLogEntry } from '@/lib/debug-log';
 import { clampLiveMemorizationStartLine } from '@/lib/live-memorization';
 import { playAudioBlob, primeAudioPlayback } from '@/lib/openai';
+import {
+  buildRealtimeSessionLogsUrl,
+  buildRealtimeSessionsUrl,
+} from '@/lib/realtime-client-logs';
 import { REALTIME_CALL_LAB_BACKEND_STORAGE_KEY, normalizeRealtimeCallLabBackendUrl, serializeRealtimeServerLogs, summarizeRealtimeEvent, type RealtimeServerLogEntry } from '@/lib/realtime-call-lab';
 import { normalizeScript } from '@/lib/script-utils';
 import type { RawScript, Script } from '@/lib/types';
@@ -252,6 +256,14 @@ function buildTapRehearsalReport(options: {
     `Version: ${APP_VERSION}`,
     `Exported: ${options.exportedAt}`,
     `Backend: ${options.backendBaseUrl || 'not configured'}`,
+    `Recent Sessions URL: ${
+      options.backendBaseUrl ? buildRealtimeSessionsUrl(options.backendBaseUrl) : 'not available'
+    }`,
+    `Session Logs URL: ${
+      options.backendBaseUrl && options.sessionId
+        ? buildRealtimeSessionLogsUrl(options.backendBaseUrl, options.sessionId)
+        : 'not available'
+    }`,
     `Character: ${options.selectedCharacter}`,
     `Start Line: ${options.startLineNumber}`,
     `Session ID: ${options.sessionId ?? 'none'}`,
