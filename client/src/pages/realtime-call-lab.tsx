@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
+import { useRealtimeClientLogSync } from '@/hooks/use-realtime-client-log-sync';
 import { buildAppRouteHref } from '@/lib/app-route';
 import { APP_VERSION } from '@/lib/version';
 import {
@@ -231,6 +232,13 @@ export default function RealtimeCallLabPage() {
     () => normalizeRealtimeCallLabBackendUrl(backendUrlInput),
     [backendUrlInput],
   );
+
+  useRealtimeClientLogSync({
+    backendBaseUrl: activeBackendBaseUrlRef.current,
+    entries: localLogs,
+    sessionId,
+    source: 'realtime-call-lab',
+  });
 
   const addLocalLog = useCallback((event: string, details?: string) => {
     setLocalLogs((entries) =>

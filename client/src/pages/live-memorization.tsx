@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
+import { useRealtimeClientLogSync } from '@/hooks/use-realtime-client-log-sync';
 import { buildAppRouteHref } from '@/lib/app-route';
 import {
   buildLiveMemorizationPreviewLines,
@@ -308,6 +309,13 @@ export default function LiveMemorizationPage() {
     () => normalizeRealtimeCallLabBackendUrl(backendUrlInput),
     [backendUrlInput],
   );
+
+  useRealtimeClientLogSync({
+    backendBaseUrl: activeBackendBaseUrlRef.current,
+    entries: localLogs,
+    sessionId,
+    source: 'live-memorization',
+  });
 
   const characters = useMemo(
     () => (script ? Array.from(new Set(script.lines.map((line) => line.character))) : []),

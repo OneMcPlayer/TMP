@@ -15,6 +15,7 @@ A browser-only rehearsal page for **Finale di partita** by Samuel Beckett. It is
 - Debug logs that capture **PWA**, **service worker**, and mobile runtime state
 - A separate **Realtime Browser Lab** route for testing a true browser-call architecture with a local backend
 - A separate **Tap Rehearsal** route for backend-managed rehearsal with hidden user lines and one large line-complete button
+- Automatic client debug-log upload for backend-assisted realtime sessions, so server logs include browser-side events
 
 ## Car Mode Note
 
@@ -74,6 +75,8 @@ The tap prototype uses the same local realtime backend but changes the rehearsal
 - the browser clears the realtime input buffer at the start of each user turn
 - the user taps one large button after finishing the line
 - wrong lines reveal and speak the correction, then the user can retry or skip
+
+Realtime backend sessions also receive client debug logs automatically from the browser. Use the backend session logs when sharing a run; copying the client-side report is only needed as a fallback.
 
 ## Quality Checks
 

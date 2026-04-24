@@ -32,6 +32,12 @@ type SessionLogEntry = {
   details?: string;
 };
 
+type ClientLogEntry = {
+  details?: unknown;
+  event?: unknown;
+  timestamp?: unknown;
+};
+
 type SessionStatus = 'connecting' | 'connected' | 'ended' | 'error';
 
 type SessionResponseQueueItem = {
@@ -121,6 +127,11 @@ type LiveMemorizationControlBody = {
   command?: LiveMemorizationCommand;
 };
 
+type ClientLogsBody = {
+  entries?: ClientLogEntry[];
+  source?: unknown;
+};
+
 const DEFAULT_MODEL = 'gpt-realtime';
 const DEFAULT_TURN_DETECTION: 'disabled' | 'server_vad' = 'server_vad';
 const DEFAULT_VOICE = 'alloy';
@@ -132,6 +143,8 @@ const LIVE_MEMORIZATION_TRANSCRIPTION_MODEL = 'gpt-4o-mini-transcribe';
 const LIVE_MEMORIZATION_TTS_MODEL = 'tts-1';
 const LIVE_MEMORIZATION_TTS_RESPONSE_FORMAT = 'mp3';
 const MAX_SPEECH_EVENTS_PER_SESSION = 200;
+const MAX_CLIENT_LOG_BATCH_SIZE = 50;
+const MAX_CLIENT_LOG_TEXT_LENGTH = 1200;
 
 const app = express();
 const sessions = new Map<string, RealtimeLabSession>();
@@ -152,6 +165,62 @@ app.use((req, res, next) => {
 
 function formatTimestamp(date = new Date()): string {
   return date.toISOString();
+}
+
+function truncateClientLogText(value: string): string {
+  if (value.length <= MAX_CLIENT_LOG_TEXT_LENGTH) {
+    return value;
+  }
+
+  return `${value.slice(0, MAX_CLIENT_LOG_TEXT_LENGTH)}...`;
+}
+
+function normalizeClientLogText(value: unknown): string | null {
+  if (typeof value === 'string') {
+    const trimmedValue = value.trim();
+    return trimmedValue ? truncateClientLogText(trimmedValue) : null;
+  }
+
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  try {
+    return truncateClientLogText(JSON.stringify(value));
+  } catch {
+    return truncateClientLogText(String(value));
+  }
+}
+
+function appendClientLogEntries(
+  session: RealtimeLabSession,
+  source: string,
+  entries: ClientLogEntry[],
+): number {
+  const safeSource = normalizeClientLogText(source) ?? 'browser';
+  let acceptedCount = 0;
+
+  for (const entry of entries.slice(0, MAX_CLIENT_LOG_BATCH_SIZE)) {
+    const event = normalizeClientLogText(entry.event) ?? 'Client Debug Event';
+    const details = normalizeClientLogText(entry.details);
+    const clientTimestamp = normalizeClientLogText(entry.timestamp);
+
+    appendSessionLog(
+      session,
+      'info',
+      `Client: ${event}`,
+      [
+        `source=${safeSource}`,
+        clientTimestamp ? `clientTime=${clientTimestamp}` : null,
+        details ? `details=${details}` : null,
+      ]
+        .filter(Boolean)
+        .join(' | '),
+    );
+    acceptedCount += 1;
+  }
+
+  return acceptedCount;
 }
 
 function summarizeRealtimeEvent(payload: unknown): string {
@@ -1370,6 +1439,32 @@ app.get('/api/realtime-webrtc/sessions/:sessionId/logs', (req, res) => {
     callId: session.callId,
     logs,
     mode: session.mode,
+    sessionId: session.id,
+    status: session.status,
+  });
+});
+
+app.post('/api/realtime-webrtc/sessions/:sessionId/client-logs', (req, res) => {
+  const session = sessions.get(req.params.sessionId);
+  if (!session) {
+    res.status(404).json({
+      error: 'Realtime experiment session not found.',
+    });
+    return;
+  }
+
+  const { entries = [], source = 'browser' } = (req.body ?? {}) as ClientLogsBody;
+  if (!Array.isArray(entries)) {
+    res.status(400).json({
+      error: 'entries must be an array of client log entries.',
+    });
+    return;
+  }
+
+  const accepted = appendClientLogEntries(session, String(source || 'browser'), entries);
+  res.json({
+    accepted,
+    ok: true,
     sessionId: session.id,
     status: session.status,
   });

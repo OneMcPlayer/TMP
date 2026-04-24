@@ -9,6 +9,7 @@ This is a separate local backend for testing whether a true browser `WebRTC` ses
 - returns the SDP answer to the browser
 - opens a sideband WebSocket to the same call
 - logs sideband events, errors, and session updates
+- accepts browser-side client debug logs for active sessions
 - exposes those logs back to the browser page for export
 
 ## Environment
@@ -56,6 +57,18 @@ The `#/tap-rehearsal` route reuses this backend with a stricter rehearsal contra
 - the browser sends `input_audio_buffer.clear` when the user turn opens
 - the browser sends `input_audio_buffer.commit` when the user taps the large line-complete button
 - `correctionMode: "reveal-and-retry"` speaks and shows the expected line after a miss without advancing the script
+
+## Client Log Uploads
+
+Backend-assisted pages automatically POST browser debug events to:
+
+- `/api/realtime-webrtc/sessions/:sessionId/client-logs`
+
+Those client events are folded into the same session log stream returned by:
+
+- `/api/realtime-webrtc/sessions/:sessionId/logs`
+
+That makes a backend log export useful without manually copying the client report after every run.
 
 ## Why this exists
 

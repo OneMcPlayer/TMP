@@ -32,6 +32,7 @@
 - The exported April 17, 2026 report came from Safari in browser-tab mode, not standalone PWA mode, and the page was not under an active service worker at the time. That means this result proves the architecture in ordinary mobile Safari first; standalone-PWA reliability still needs to be tested separately.
 - The same report also showed a later `Backend Log Poll Failed — Load failed` event after report export, which looks more like a transient fetch/polling issue during or after the session than a call-establishment failure.
 - On April 24, 2026, the repo gained a separate `#/tap-rehearsal` prototype that keeps the script cursor and correction policy on the backend, hides normal user lines, disables automatic VAD commits, and lets the user tap once when their line is complete.
+- The backend-assisted realtime pages now upload client debug events to the active backend session, so `/logs` contains both server and browser-side evidence for a run.
 
 ## Working assumptions
 

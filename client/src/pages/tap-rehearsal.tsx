@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/hooks/use-toast';
+import { useRealtimeClientLogSync } from '@/hooks/use-realtime-client-log-sync';
 import { buildAppRouteHref } from '@/lib/app-route';
 import { appendDebugLogEntry, createDebugLogEntry, serializeDebugLogEntries, type DebugLogEntry } from '@/lib/debug-log';
 import { clampLiveMemorizationStartLine } from '@/lib/live-memorization';
@@ -336,6 +337,14 @@ export default function TapRehearsalPage() {
     () => normalizeRealtimeCallLabBackendUrl(backendUrlInput),
     [backendUrlInput],
   );
+
+  useRealtimeClientLogSync({
+    backendBaseUrl: activeBackendBaseUrlRef.current,
+    entries: localLogs,
+    sessionId,
+    source: 'tap-rehearsal',
+  });
+
   const characters = useMemo(
     () => (script ? Array.from(new Set(script.lines.map((line) => line.character))) : []),
     [script],
