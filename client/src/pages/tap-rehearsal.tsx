@@ -242,6 +242,7 @@ function buildTapRehearsalReport(options: {
   exportedAt: string;
   iceConnectionState: string;
   iceGatheringState: string;
+  isControlStatePending: boolean;
   isCommittingTurn: boolean;
   isTurnReady: boolean;
   isWaitingForCoachCue: boolean;
@@ -279,6 +280,7 @@ function buildTapRehearsalReport(options: {
     `Signaling: ${options.signalingState}`,
     `Data channel: ${options.dataChannelState}`,
     `Current line: ${options.currentLine ? `${options.currentLine.lineNumber} ${options.currentLine.character}` : 'done'}`,
+    `Control state pending: ${options.isControlStatePending ? 'yes' : 'no'}`,
     `Coach cue pending: ${options.isWaitingForCoachCue ? 'yes' : 'no'}`,
     `Turn ready: ${options.isTurnReady ? 'yes' : 'no'}`,
     `Turn committing: ${options.isCommittingTurn ? 'yes' : 'no'}`,
@@ -323,6 +325,7 @@ export default function TapRehearsalPage() {
   const [correction, setCorrection] = useState<TapRehearsalCorrection | null>(null);
   const [coachAudioPlaying, setCoachAudioPlaying] = useState(false);
   const [speechQueueLength, setSpeechQueueLength] = useState(0);
+  const [isControlStatePending, setIsControlStatePending] = useState(false);
   const [isWaitingForCoachCue, setIsWaitingForCoachCue] = useState(false);
   const [isTurnReady, setIsTurnReady] = useState(false);
   const [isCommittingTurn, setIsCommittingTurn] = useState(false);
@@ -340,6 +343,7 @@ export default function TapRehearsalPage() {
   const serverLogPollIntervalRef = useRef<number | null>(null);
   const statePollIntervalRef = useRef<number | null>(null);
   const lastBackendPollErrorRef = useRef<string | null>(null);
+  const stateGenerationRef = useRef(0);
   const isStartingSessionRef = useRef(false);
   const speechQueueRef = useRef<LiveMemorizationSpeechEvent[]>([]);
   const speechAudioCacheRef = useRef<Map<number, Blob>>(new Map());
@@ -621,6 +625,7 @@ export default function TapRehearsalPage() {
   const fetchTapRehearsalState = useCallback(async () => {
     const activeBackendBaseUrl = activeBackendBaseUrlRef.current;
     const activeSessionId = sessionIdRef.current;
+    const requestStateGeneration = stateGenerationRef.current;
 
     if (!activeBackendBaseUrl || !activeSessionId) {
       return;
@@ -638,6 +643,10 @@ export default function TapRehearsalPage() {
       }
 
       const payload = (await response.json()) as TapRehearsalStateResponse;
+      if (requestStateGeneration !== stateGenerationRef.current) {
+        return;
+      }
+
       lastBackendPollErrorRef.current = null;
 
       if (typeof payload.callId === 'string') {
@@ -668,6 +677,7 @@ export default function TapRehearsalPage() {
 
       setCurrentLine(nextLine);
       setCorrection(nextCorrection);
+      setIsControlStatePending(false);
       appendSpeechEvents(payload.speech ?? []);
 
       if (
@@ -692,6 +702,10 @@ export default function TapRehearsalPage() {
         setErrorMessage('The backend session reported an error. Download the report for details.');
       }
     } catch (error) {
+      if (requestStateGeneration !== stateGenerationRef.current) {
+        return;
+      }
+
       const message = error instanceof Error ? error.message : 'Unknown backend state polling error';
       if (lastBackendPollErrorRef.current === message) {
         return;
@@ -717,6 +731,7 @@ export default function TapRehearsalPage() {
   const cleanupActiveSession = useCallback(
     async (options?: { notifyBackend?: boolean }) => {
       clearPolling();
+      stateGenerationRef.current += 1;
       interruptCoachAudioPlayback('session-cleanup');
       speechQueueRef.current = [];
       speechAudioCacheRef.current.clear();
@@ -806,6 +821,7 @@ export default function TapRehearsalPage() {
       setCorrection(null);
       setCoachAudioPlaying(false);
       setSpeechQueueLength(0);
+      setIsControlStatePending(false);
       setIsWaitingForCoachCue(false);
       setIsTurnReady(false);
       setIsCommittingTurn(false);
@@ -834,6 +850,7 @@ export default function TapRehearsalPage() {
         coachAudioPlaying,
         currentLine,
         dataChannelState,
+        isControlStatePending,
         isCommittingTurn,
         isOpeningTurn: isOpeningTurnRef.current,
         isWaitingForCoachCue,
@@ -870,6 +887,7 @@ export default function TapRehearsalPage() {
     correction?.timestamp,
     currentLine,
     dataChannelState,
+    isControlStatePending,
     isCommittingTurn,
     isWaitingForCoachCue,
     sendRealtimeEvent,
@@ -937,9 +955,12 @@ export default function TapRehearsalPage() {
         }
 
         if (command === 'skip') {
+          stateGenerationRef.current += 1;
           setIsTurnReady(false);
           setIsCommittingTurn(false);
-          setIsWaitingForCoachCue(false);
+          setIsControlStatePending(true);
+          setIsWaitingForCoachCue(true);
+          setCurrentLine(null);
           setCorrection(null);
           lastOpenedTurnKeyRef.current = null;
           pendingCoachCueTurnKeyRef.current = null;
@@ -1256,6 +1277,7 @@ export default function TapRehearsalPage() {
       exportedAt: new Date().toISOString(),
       iceConnectionState,
       iceGatheringState,
+      isControlStatePending,
       isCommittingTurn,
       isWaitingForCoachCue,
       isTurnReady,
@@ -1280,6 +1302,7 @@ export default function TapRehearsalPage() {
     dataChannelState,
     iceConnectionState,
     iceGatheringState,
+    isControlStatePending,
     isCommittingTurn,
     isWaitingForCoachCue,
     isTurnReady,
@@ -1363,6 +1386,10 @@ export default function TapRehearsalPage() {
   }, [cleanupActiveSession]);
 
   const sessionLabel = useMemo(() => {
+    if (isControlStatePending) {
+      return 'Preparing';
+    }
+
     if (!currentLine) {
       return status === 'connected' ? 'Complete' : 'Not started';
     }
@@ -1387,6 +1414,7 @@ export default function TapRehearsalPage() {
   }, [
     coachAudioPlaying,
     currentLine,
+    isControlStatePending,
     isCommittingTurn,
     isTurnReady,
     isWaitingForCoachCue,
@@ -1651,6 +1679,7 @@ export default function TapRehearsalPage() {
                   exportedAt: new Date().toISOString(),
                   iceConnectionState,
                   iceGatheringState,
+                  isControlStatePending,
                   isCommittingTurn,
                   isWaitingForCoachCue,
                   isTurnReady,

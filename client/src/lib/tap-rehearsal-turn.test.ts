@@ -64,6 +64,7 @@ test('canOpenTapUserTurn waits until coach cue speech is complete', () => {
     coachAudioPlaying: false,
     currentLine: { isUserLine: true, lineNumber: 2 },
     dataChannelState: 'open',
+    isControlStatePending: false,
     isCommittingTurn: false,
     isOpeningTurn: false,
     speechQueueLength: 0,
@@ -83,6 +84,14 @@ test('canOpenTapUserTurn waits until coach cue speech is complete', () => {
       isWaitingForCoachCue: false,
     }),
     true,
+  );
+  assert.equal(
+    canOpenTapUserTurn({
+      ...readyState,
+      isControlStatePending: true,
+      isWaitingForCoachCue: false,
+    }),
+    false,
   );
   assert.equal(
     canOpenTapUserTurn({

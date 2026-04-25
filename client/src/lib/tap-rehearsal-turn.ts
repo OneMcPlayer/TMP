@@ -36,6 +36,7 @@ export function canOpenTapUserTurn(options: {
   coachAudioPlaying: boolean;
   currentLine: TapRehearsalTurnLine | null;
   dataChannelState: string;
+  isControlStatePending: boolean;
   isCommittingTurn: boolean;
   isOpeningTurn: boolean;
   isWaitingForCoachCue: boolean;
@@ -49,6 +50,7 @@ export function canOpenTapUserTurn(options: {
     !options.coachAudioPlaying &&
     options.speechQueueLength === 0 &&
     !options.isWaitingForCoachCue &&
+    !options.isControlStatePending &&
     !options.isCommittingTurn &&
     !options.isOpeningTurn
   );
