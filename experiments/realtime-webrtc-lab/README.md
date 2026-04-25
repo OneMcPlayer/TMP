@@ -54,9 +54,12 @@ Or, when using Codespaces / a forwarded public port:
 The `#/tap-rehearsal` route reuses this backend with a stricter rehearsal contract:
 
 - `turnCommitMode: "manual"` disables automatic VAD turn commits
-- the browser sends `input_audio_buffer.clear` when the user turn opens
-- the browser sends `input_audio_buffer.commit` when the user taps the large line-complete button
+- the browser sends `input_audio_buffer.clear` when the user turn opens so the Realtime session stays aligned
+- the browser records the user turn with `MediaRecorder` and uploads it to `/api/realtime-webrtc/sessions/:sessionId/live-memorization/audio-attempt` when the user taps the large line-complete button
+- the backend transcribes that uploaded clip with the same expected-line prompt and then applies the shared live-memorization scoring/correction logic
 - `correctionMode: "reveal-and-retry"` speaks and shows the expected line after a miss without advancing the script
+
+Earlier versions tried to finish each tap turn with `input_audio_buffer.commit`. Real session logs on April 25, 2026 showed that retry turns could reach OpenAI as `0.00ms` buffers after correction playback, so the tap route now treats uploaded browser recordings as the primary turn-submission path and keeps Realtime buffer commits only as a fallback.
 
 ## Client Log Uploads
 

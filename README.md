@@ -72,7 +72,7 @@ The tap prototype uses the same local realtime backend but changes the rehearsal
 
 - partner lines are spoken automatically
 - user lines are not shown during normal play
-- the browser clears the realtime input buffer at the start of each user turn
+- the browser records each user turn locally, then uploads the audio clip to the backend for transcription and scoring
 - the user taps one large button after finishing the line
 - wrong lines reveal and speak the correction, then the user can retry or skip
 
