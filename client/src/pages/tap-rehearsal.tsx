@@ -87,7 +87,13 @@ const DEFAULT_VOICE = 'alloy';
 const ICE_GATHERING_TIMEOUT_MS = 1500;
 const BACKEND_LOG_POLL_INTERVAL_MS = 1500;
 const TAP_STATE_POLL_INTERVAL_MS = 350;
+const RECORDING_FINAL_DATA_DRAIN_MS = 300;
 const REHEARSAL_PREFERENCES_STORAGE_KEY = 'rehearsal_preferences';
+
+type TurnRecordingStopResult =
+  | { blob: Blob; type: 'recorded' }
+  | { mimeType: string; type: 'empty' }
+  | { type: 'unavailable' };
 
 function getStatusVariant(
   status: SessionStatus,
@@ -156,9 +162,9 @@ function getPreferredRecordingMimeType(): string | undefined {
   }
 
   const candidates = [
+    'audio/mp4',
     'audio/webm;codecs=opus',
     'audio/webm',
-    'audio/mp4',
     'audio/ogg;codecs=opus',
   ];
 
@@ -168,6 +174,33 @@ function getPreferredRecordingMimeType(): string | undefined {
 function buildBlobFromChunks(chunks: Blob[], mimeType: string): Blob {
   return new Blob(chunks, {
     type: chunks[0]?.type || mimeType || 'audio/webm',
+  });
+}
+
+function createTurnRecordingStream(sourceStream: MediaStream): MediaStream {
+  const sourceTracks = sourceStream.getAudioTracks();
+  if (sourceTracks.length === 0) {
+    return sourceStream;
+  }
+
+  const clonedTracks = sourceTracks.map((track) =>
+    typeof track.clone === 'function' ? track.clone() : track,
+  );
+
+  if (clonedTracks.some((track, index) => track === sourceTracks[index])) {
+    return sourceStream;
+  }
+
+  return new MediaStream(clonedTracks);
+}
+
+function stopRecordingStream(recordingStream: MediaStream | null, sourceStream: MediaStream | null): void {
+  if (!recordingStream || recordingStream === sourceStream) {
+    return;
+  }
+
+  recordingStream.getTracks().forEach((track) => {
+    track.stop();
   });
 }
 
@@ -280,6 +313,7 @@ function buildTapRehearsalReport(options: {
   isControlStatePending: boolean;
   isCommittingTurn: boolean;
   isTurnReady: boolean;
+  isTurnRecording: boolean;
   isWaitingForCoachCue: boolean;
   localLogs: DebugLogEntry[];
   selectedCharacter: string;
@@ -319,6 +353,7 @@ function buildTapRehearsalReport(options: {
     `Coach cue pending: ${options.isWaitingForCoachCue ? 'yes' : 'no'}`,
     `Turn ready: ${options.isTurnReady ? 'yes' : 'no'}`,
     `Turn committing: ${options.isCommittingTurn ? 'yes' : 'no'}`,
+    `Turn recording: ${options.isTurnRecording ? 'yes' : 'no'}`,
     `Correction: ${options.correction ? `${options.correction.lineNumber} at ${options.correction.accuracy}%` : 'none'}`,
     '',
     'Local Log',
@@ -364,6 +399,7 @@ export default function TapRehearsalPage() {
   const [isWaitingForCoachCue, setIsWaitingForCoachCue] = useState(false);
   const [isTurnReady, setIsTurnReady] = useState(false);
   const [isCommittingTurn, setIsCommittingTurn] = useState(false);
+  const [isTurnRecording, setIsTurnRecording] = useState(false);
   const [localLogs, setLocalLogs] = useState<DebugLogEntry[]>([]);
   const [serverLogs, setServerLogs] = useState<RealtimeServerLogEntry[]>([]);
 
@@ -393,6 +429,7 @@ export default function TapRehearsalPage() {
   const isOpeningTurnRef = useRef(false);
   const committedLineNumberRef = useRef<number | null>(null);
   const turnMediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const turnRecordingStreamRef = useRef<MediaStream | null>(null);
   const turnRecordingChunksRef = useRef<Blob[]>([]);
   const turnRecordingMimeTypeRef = useRef('audio/webm');
   const activeRecordingTurnKeyRef = useRef<string | null>(null);
@@ -788,7 +825,9 @@ export default function TapRehearsalPage() {
       } catch {
         // Recording cleanup is best-effort during session shutdown.
       }
+      stopRecordingStream(turnRecordingStreamRef.current, localStreamRef.current);
       turnMediaRecorderRef.current = null;
+      turnRecordingStreamRef.current = null;
       activeRecordingTurnKeyRef.current = null;
       turnRecordingChunksRef.current = [];
 
@@ -874,6 +913,7 @@ export default function TapRehearsalPage() {
       setIsWaitingForCoachCue(false);
       setIsTurnReady(false);
       setIsCommittingTurn(false);
+      setIsTurnRecording(false);
     },
     [addLocalLog, clearPolling, interruptCoachAudioPlayback, syncPeerConnectionSnapshot],
   );
@@ -911,35 +951,47 @@ export default function TapRehearsalPage() {
       } catch {
         // A stale recorder should not block a fresh turn.
       }
+      stopRecordingStream(turnRecordingStreamRef.current, localStream);
 
       const mimeType = getPreferredRecordingMimeType() ?? 'audio/webm';
       const recorderOptions = mimeType ? { mimeType } : undefined;
 
       try {
-        const recorder = new MediaRecorder(localStream, recorderOptions);
-        turnRecordingChunksRef.current = [];
+        const recordingStream = createTurnRecordingStream(localStream);
+        const recorder = new MediaRecorder(recordingStream, recorderOptions);
+        const recordingChunks: Blob[] = [];
+        turnRecordingChunksRef.current = recordingChunks;
         turnRecordingMimeTypeRef.current = recorder.mimeType || mimeType;
+        turnRecordingStreamRef.current = recordingStream;
         activeRecordingTurnKeyRef.current = turnKey;
 
         recorder.ondataavailable = (event) => {
-          if (event.data.size > 0) {
-            turnRecordingChunksRef.current.push(event.data);
+          if (
+            event.data.size > 0 &&
+            turnMediaRecorderRef.current === recorder &&
+            activeRecordingTurnKeyRef.current === turnKey
+          ) {
+            recordingChunks.push(event.data);
           }
         };
         recorder.onerror = () => {
           addLocalLog('Turn Recording Error', `turn=${turnKey}`);
         };
-        recorder.start(250);
+        recorder.start();
         turnMediaRecorderRef.current = recorder;
+        setIsTurnRecording(true);
         addLocalLog(
           'Turn Recording Started',
-          `turn=${turnKey} | mime=${turnRecordingMimeTypeRef.current}`,
+          `turn=${turnKey} | mime=${turnRecordingMimeTypeRef.current} | tracks=${recordingStream.getAudioTracks().length}`,
         );
         return true;
       } catch (error) {
+        stopRecordingStream(turnRecordingStreamRef.current, localStream);
         turnMediaRecorderRef.current = null;
+        turnRecordingStreamRef.current = null;
         activeRecordingTurnKeyRef.current = null;
         turnRecordingChunksRef.current = [];
+        setIsTurnRecording(false);
         addLocalLog(
           'Turn Recording Failed',
           error instanceof Error ? error.message : 'Unknown MediaRecorder error',
@@ -951,11 +1003,13 @@ export default function TapRehearsalPage() {
   );
 
   const stopTurnRecording = useCallback(
-    async (turnKey: string | null): Promise<Blob | null> => {
+    async (turnKey: string | null): Promise<TurnRecordingStopResult> => {
       const recorder = turnMediaRecorderRef.current;
+      const recordingStream = turnRecordingStreamRef.current;
+      const sourceStream = localStreamRef.current;
       const activeTurnKey = activeRecordingTurnKeyRef.current;
       if (!recorder || !turnKey || activeTurnKey !== turnKey) {
-        return null;
+        return { type: 'unavailable' };
       }
 
       const finalizeRecording = () => {
@@ -964,33 +1018,62 @@ export default function TapRehearsalPage() {
           turnRecordingMimeTypeRef.current,
         );
         turnMediaRecorderRef.current = null;
+        turnRecordingStreamRef.current = null;
         activeRecordingTurnKeyRef.current = null;
         turnRecordingChunksRef.current = [];
+        stopRecordingStream(recordingStream, sourceStream);
+        setIsTurnRecording(false);
         addLocalLog(
           'Turn Recording Stopped',
           `turn=${turnKey} | bytes=${audioBlob.size} | mime=${audioBlob.type || 'unknown'}`,
         );
-        return audioBlob.size > 0 ? audioBlob : null;
+        return audioBlob.size > 0
+          ? ({ blob: audioBlob, type: 'recorded' } as const)
+          : ({ mimeType: audioBlob.type || turnRecordingMimeTypeRef.current, type: 'empty' } as const);
       };
 
       if (recorder.state === 'inactive') {
         return finalizeRecording();
       }
 
-      return new Promise<Blob | null>((resolve) => {
-        const timeoutId = window.setTimeout(() => {
-          addLocalLog('Turn Recording Stop Timed Out', `turn=${turnKey}`);
-          resolve(finalizeRecording());
-        }, 2500);
+      return new Promise<TurnRecordingStopResult>((resolve) => {
+        let settled = false;
+        let drainTimeoutId: number | null = null;
+        const settle = () => {
+          if (settled) {
+            return;
+          }
 
-        recorder.onstop = () => {
-          window.clearTimeout(timeoutId);
+          settled = true;
+          window.clearTimeout(stopTimeoutId);
+          if (drainTimeoutId !== null) {
+            window.clearTimeout(drainTimeoutId);
+          }
           resolve(finalizeRecording());
         };
+        const stopTimeoutId = window.setTimeout(() => {
+          addLocalLog('Turn Recording Stop Timed Out', `turn=${turnKey}`);
+          settle();
+        }, 4000);
+
+        const scheduleDrain = () => {
+          if (drainTimeoutId !== null) {
+            window.clearTimeout(drainTimeoutId);
+          }
+
+          drainTimeoutId = window.setTimeout(settle, RECORDING_FINAL_DATA_DRAIN_MS);
+        };
+
+        recorder.onstop = scheduleDrain;
         recorder.ondataavailable = (event) => {
-          if (event.data.size > 0) {
+          if (
+            event.data.size > 0 &&
+            turnMediaRecorderRef.current === recorder &&
+            activeRecordingTurnKeyRef.current === turnKey
+          ) {
             turnRecordingChunksRef.current.push(event.data);
           }
+          scheduleDrain();
         };
 
         try {
@@ -1002,12 +1085,12 @@ export default function TapRehearsalPage() {
         try {
           recorder.stop();
         } catch (error) {
-          window.clearTimeout(timeoutId);
+          window.clearTimeout(stopTimeoutId);
           addLocalLog(
             'Turn Recording Stop Failed',
             error instanceof Error ? error.message : 'Unknown MediaRecorder stop error',
           );
-          resolve(finalizeRecording());
+          settle();
         }
       });
     },
@@ -1113,12 +1196,12 @@ export default function TapRehearsalPage() {
     committedLineNumberRef.current = currentLine.lineNumber;
     setIsTurnReady(false);
     setIsCommittingTurn(true);
-    setCorrection(null);
 
-    const recordedAudio = await stopTurnRecording(turnKey);
-    if (recordedAudio) {
+    const recordingResult = await stopTurnRecording(turnKey);
+    if (recordingResult.type === 'recorded') {
       try {
-        await submitRecordedTurnAudio(recordedAudio);
+        setCorrection(null);
+        await submitRecordedTurnAudio(recordingResult.blob);
         void fetchServerLogs();
         void fetchTapRehearsalState();
       } catch (error) {
@@ -1137,6 +1220,35 @@ export default function TapRehearsalPage() {
       return;
     }
 
+    if (recordingResult.type === 'empty') {
+      addLocalLog('Recorded User Line Empty', `turn=${turnKey ?? 'unknown'} | mime=${recordingResult.mimeType}`);
+      committedLineNumberRef.current = null;
+      lastOpenedTurnKeyRef.current = null;
+      setIsCommittingTurn(false);
+      setIsTurnReady(false);
+      toast({
+        title: 'No audio captured',
+        description: 'Please say the line again, then tap when finished.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (typeof MediaRecorder !== 'undefined') {
+      addLocalLog('Turn Recording Missing', `turn=${turnKey ?? 'unknown'}`);
+      committedLineNumberRef.current = null;
+      lastOpenedTurnKeyRef.current = null;
+      setIsCommittingTurn(false);
+      setIsTurnReady(false);
+      toast({
+        title: 'Recording was not ready',
+        description: 'Please say the line again, then tap when finished.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setCorrection(null);
     const didCommit = sendRealtimeEvent(
       {
         type: 'input_audio_buffer.commit',
@@ -1221,9 +1333,12 @@ export default function TapRehearsalPage() {
           } catch {
             // Discarding a stale recorder should not block skip.
           }
+          stopRecordingStream(turnRecordingStreamRef.current, localStreamRef.current);
           turnMediaRecorderRef.current = null;
+          turnRecordingStreamRef.current = null;
           activeRecordingTurnKeyRef.current = null;
           turnRecordingChunksRef.current = [];
+          setIsTurnRecording(false);
         }
 
         addLocalLog('Control Command Sent', command);
@@ -1537,6 +1652,7 @@ export default function TapRehearsalPage() {
       iceGatheringState,
       isControlStatePending,
       isCommittingTurn,
+      isTurnRecording,
       isWaitingForCoachCue,
       isTurnReady,
       localLogs,
@@ -1562,6 +1678,7 @@ export default function TapRehearsalPage() {
     iceGatheringState,
     isControlStatePending,
     isCommittingTurn,
+    isTurnRecording,
     isWaitingForCoachCue,
     isTurnReady,
     reportCallId,
@@ -1891,6 +2008,8 @@ export default function TapRehearsalPage() {
                 <span className="flex flex-col items-center gap-3">
                   {isCommittingTurn ? (
                     <Loader2 className="h-16 w-16 animate-spin" />
+                  ) : isTurnReady || isTurnRecording ? (
+                    <Mic className="h-16 w-16" />
                   ) : (
                     <Check className="h-16 w-16" />
                   )}
@@ -1941,6 +2060,7 @@ export default function TapRehearsalPage() {
                   isCommittingTurn,
                   isWaitingForCoachCue,
                   isTurnReady,
+                  isTurnRecording,
                   localLogs,
                   selectedCharacter: selectedCharacter ?? 'not selected',
                   serverLogs,

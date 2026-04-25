@@ -1,6 +1,6 @@
 {
   "name": "finale-di-partita-rehearsal-partner",
-  "version": "1.3.9",
+  "version": "1.3.10",
   "type": "module",
   "license": "MIT",
   "scripts": {
@@ -14,7 +14,7 @@
     "test:e2e": "playwright test",
     "test:e2e:ci": "playwright test --workers=2",
     "test:e2e:headed": "playwright test --headed",
-    "test:e2e:tap:file": "npm run build && PLAYWRIGHT_BROWSER=firefox PLAYWRIGHT_SKIP_WEBSERVER=1 PLAYWRIGHT_START_URL=file://$PWD/dist/index.html playwright test e2e/rehearsal.spec.ts -g \"tap rehearsal recovers\"",
+    "test:e2e:tap:file": "npm run build && PLAYWRIGHT_BROWSER=firefox PLAYWRIGHT_SKIP_WEBSERVER=1 PLAYWRIGHT_START_URL=file://$PWD/dist/index.html playwright test e2e/rehearsal.spec.ts -g \"tap rehearsal (recovers|retries)\"",
     "test:full": "npm run check && npm test && npm run test:logic && npm run test:e2e && npm run build",
     "test:full:ci": "npm run check && npm test && npm run test:logic && npm run test:e2e:ci && npm run build"
   },

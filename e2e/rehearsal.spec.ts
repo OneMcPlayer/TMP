@@ -176,6 +176,8 @@ async function setupTapRealtimeBrowserMocks(page: Parameters<typeof setupRehears
 }
 
 async function setupTapRealtimeBackendMocks(page: Parameters<typeof setupRehearsalApp>[0]) {
+  const dataChannelEvents: string[] = [];
+  let audioAttemptCount = 0;
   let nextSpeechSeq = 1;
   let correctionTimestamp = '2026-04-25T10:00:00.000Z';
   let currentLine = {
@@ -263,6 +265,10 @@ async function setupTapRealtimeBackendMocks(page: Parameters<typeof setupRehears
 
     if (url.pathname === '/__e2e-data-channel') {
       const payload = request.postDataJSON() as { type?: string };
+      if (payload.type) {
+        dataChannelEvents.push(payload.type);
+      }
+
       if (payload.type === 'input_audio_buffer.commit' && !committedWrongLine) {
         committedWrongLine = true;
         correctionTimestamp = '2026-04-25T10:00:01.000Z';
@@ -291,6 +297,7 @@ async function setupTapRealtimeBackendMocks(page: Parameters<typeof setupRehears
     }
 
     if (url.pathname.endsWith('/live-memorization/audio-attempt')) {
+      audioAttemptCount += 1;
       if (!committedWrongLine) {
         committedWrongLine = true;
         correctionTimestamp = '2026-04-25T10:00:01.000Z';
@@ -424,6 +431,11 @@ async function setupTapRealtimeBackendMocks(page: Parameters<typeof setupRehears
       body: JSON.stringify({ error: `Unhandled tap backend mock path: ${url.pathname}` }),
     });
   });
+
+  return {
+    getAudioAttemptCount: () => audioAttemptCount,
+    getDataChannelEvents: () => [...dataChannelEvents],
+  };
 }
 
 test.describe('rehearsal browser e2e', () => {
@@ -523,6 +535,29 @@ test.describe('rehearsal browser e2e', () => {
     await expect(page.getByText('Line 3')).toBeVisible();
     await expect(lineDoneButton).toContainText('Line Done');
     await expect(lineDoneButton).toBeEnabled();
+  });
+
+  test('tap rehearsal retries locally when turn recording is empty', async ({ page }) => {
+    await setupTapRealtimeBrowserMocks(page);
+    const tapBackend = await setupTapRealtimeBackendMocks(page);
+    await setupRehearsalApp(page, {
+      mediaRecorderBlobSizes: [0],
+      script: TAP_REHEARSAL_SCRIPT,
+      selectedCharacter: 'BOB',
+      startUrl: process.env.PLAYWRIGHT_START_URL ?? '/',
+    });
+
+    await page.getByTestId('button-open-tap-rehearsal').click();
+    await page.getByTestId('button-tap-rehearsal-start').click();
+
+    const lineDoneButton = page.getByTestId('button-tap-rehearsal-line-done');
+    await expect(lineDoneButton).toContainText('Line Done');
+    await lineDoneButton.click();
+
+    await expect(lineDoneButton).toContainText('Line Done');
+    await expect(lineDoneButton).toBeEnabled();
+    expect(tapBackend.getAudioAttemptCount()).toBe(0);
+    expect(tapBackend.getDataChannelEvents()).not.toContain('input_audio_buffer.commit');
   });
 
   test('keeps the settings button available on the launch screen', async ({ page }) => {

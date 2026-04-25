@@ -36,6 +36,7 @@
 - On April 25, 2026, server-side tap-rehearsal logs showed the correction/skip flow was no longer stuck after a wrong first line, but retry turns submitted through Realtime `input_audio_buffer.commit` could be rejected as `buffer too small` with `0.00ms` of audio.
 - Because of that April 25 result, tap rehearsal now records each user turn in the browser with `MediaRecorder`, uploads the clip to the backend `audio-attempt` endpoint, and lets the backend transcribe/evaluate it with the same correction policy. The Realtime buffer commit path remains only as a fallback.
 - The deterministic no-server Firefox E2E harness now covers the correction retry plus skip-forward path for the tap prototype.
+- A later April 25, 2026 tap-rehearsal `1.3.9` run confirmed that the uploaded-recording path can work for the first user line: the browser produced a 54 KB `audio/webm` clip, the backend transcribed it, and the correction was spoken. The same run then showed a new failure after correction playback, skip, and a long partner cue: subsequent `MediaRecorder` turns stopped with `bytes=0`, and falling back to Realtime `input_audio_buffer.commit` recreated the old `0.00ms` buffer errors. Empty local turn recordings should therefore be treated as a local retry condition, not as a reason to fall back to Realtime commits.
 
 ## Working assumptions
 
@@ -67,6 +68,7 @@
 - After the browser-tab success on April 17, 2026, how much of that same behavior survives when the exact same backend-assisted call flow is retried in standalone PWA mode?
 - Does the `#/tap-rehearsal` manual-commit flow produce cleaner user-line boundaries than server VAD while still keeping the microphone and playback reliable on iPhone Safari and standalone PWA?
 - Does the new uploaded-recording tap path avoid the `0.00ms` retry-buffer failure on iPhone Safari and standalone PWA while keeping the stage-mode interaction simple?
+- Does cloning the mic track for each `MediaRecorder` turn, waiting for final `dataavailable`, and retrying locally on empty clips prevent the post-correction zero-byte recording sequence seen in tap rehearsal `1.3.9`?
 
 ## How to use new evidence
 
