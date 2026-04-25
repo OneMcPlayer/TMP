@@ -215,30 +215,41 @@ function appendClientLogEntries(
   source: string,
   entries: ClientLogEntry[],
 ): number {
-  const safeSource = normalizeClientLogText(source) ?? 'browser';
   let acceptedCount = 0;
 
   for (const entry of entries.slice(0, MAX_CLIENT_LOG_BATCH_SIZE)) {
-    const event = normalizeClientLogText(entry.event) ?? 'Client Debug Event';
-    const details = normalizeClientLogText(entry.details);
-    const clientTimestamp = normalizeClientLogText(entry.timestamp);
-
+    const message = buildClientLogMessage(source, entry);
     appendSessionLog(
       session,
       'info',
-      `Client: ${event}`,
-      [
-        `source=${safeSource}`,
-        clientTimestamp ? `clientTime=${clientTimestamp}` : null,
-        details ? `details=${details}` : null,
-      ]
-        .filter(Boolean)
-        .join(' | '),
+      message.event,
+      message.details,
     );
     acceptedCount += 1;
   }
 
   return acceptedCount;
+}
+
+function buildClientLogMessage(
+  source: string,
+  entry: ClientLogEntry,
+): Pick<SessionLogEntry, 'details' | 'event'> {
+  const safeSource = normalizeClientLogText(source) ?? 'browser';
+  const event = normalizeClientLogText(entry.event) ?? 'Client Debug Event';
+  const details = normalizeClientLogText(entry.details);
+  const clientTimestamp = normalizeClientLogText(entry.timestamp);
+
+  return {
+    event: `Client: ${event}`,
+    details: [
+      `source=${safeSource}`,
+      clientTimestamp ? `clientTime=${clientTimestamp}` : null,
+      details ? `details=${details}` : null,
+    ]
+      .filter(Boolean)
+      .join(' | '),
+  };
 }
 
 function buildPublicSessionSummary(session: RealtimeLabSession): PublicSessionSummary {
@@ -276,6 +287,10 @@ async function persistSessionLogEntry(
     log: entry,
   };
 
+  await appendPersistentLogRecord(record);
+}
+
+async function appendPersistentLogRecord(record: unknown): Promise<void> {
   try {
     await fs.mkdir(path.dirname(REALTIME_SESSION_LOG_FILE), { recursive: true });
     await fs.appendFile(
@@ -286,6 +301,39 @@ async function persistSessionLogEntry(
   } catch {
     // Persistent logs are a debugging aid; never let file I/O break a live session.
   }
+}
+
+async function persistDiagnosticClientLogEntries(
+  source: string,
+  entries: ClientLogEntry[],
+): Promise<number> {
+  let acceptedCount = 0;
+
+  for (const entry of entries.slice(0, MAX_CLIENT_LOG_BATCH_SIZE)) {
+    const message = buildClientLogMessage(source, entry);
+    const logEntry: SessionLogEntry = {
+      seq: acceptedCount + 1,
+      timestamp: formatTimestamp(),
+      level: 'info',
+      event: message.event,
+      details: message.details,
+    };
+
+    await appendPersistentLogRecord({
+      sessionId: null,
+      callId: null,
+      createdAt: logEntry.timestamp,
+      mode: 'client-diagnostic',
+      model: null,
+      source: normalizeClientLogText(source) ?? 'browser',
+      status: 'client-log',
+      voice: null,
+      log: logEntry,
+    });
+    acceptedCount += 1;
+  }
+
+  return acceptedCount;
 }
 
 function summarizeRealtimeEvent(payload: unknown): string {
@@ -1552,6 +1600,23 @@ app.post('/api/realtime-webrtc/sessions/:sessionId/client-logs', (req, res) => {
     ok: true,
     sessionId: session.id,
     status: session.status,
+  });
+});
+
+app.post('/api/realtime-webrtc/client-logs', async (req, res) => {
+  const { entries = [], source = 'browser' } = (req.body ?? {}) as ClientLogsBody;
+  if (!Array.isArray(entries)) {
+    res.status(400).json({
+      error: 'entries must be an array of client log entries.',
+    });
+    return;
+  }
+
+  const accepted = await persistDiagnosticClientLogEntries(String(source || 'browser'), entries);
+  res.json({
+    accepted,
+    logFile: REALTIME_SESSION_LOG_FILE,
+    ok: true,
   });
 });
 

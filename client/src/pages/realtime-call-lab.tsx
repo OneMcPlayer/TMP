@@ -234,7 +234,7 @@ export default function RealtimeCallLabPage() {
   );
 
   useRealtimeClientLogSync({
-    backendBaseUrl: activeBackendBaseUrlRef.current,
+    backendBaseUrl: activeBackendBaseUrlRef.current ?? normalizedBackendUrl,
     entries: localLogs,
     sessionId,
     source: 'realtime-call-lab',

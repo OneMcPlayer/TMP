@@ -311,7 +311,7 @@ export default function LiveMemorizationPage() {
   );
 
   useRealtimeClientLogSync({
-    backendBaseUrl: activeBackendBaseUrlRef.current,
+    backendBaseUrl: activeBackendBaseUrlRef.current ?? normalizedBackendUrl,
     entries: localLogs,
     sessionId,
     source: 'live-memorization',

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   MAX_REALTIME_CLIENT_LOG_BATCH_SIZE,
+  buildRealtimeClientDiagnosticsLogsUrl,
   buildRealtimeClientLogsUrl,
   buildRealtimeSessionLogsUrl,
   buildRealtimeSessionsUrl,
@@ -13,6 +14,10 @@ test('buildRealtimeClientLogsUrl targets the session client log endpoint', () =>
   assert.equal(
     buildRealtimeClientLogsUrl('http://127.0.0.1:8787', 'session 1'),
     'http://127.0.0.1:8787/api/realtime-webrtc/sessions/session%201/client-logs',
+  );
+  assert.equal(
+    buildRealtimeClientDiagnosticsLogsUrl('http://127.0.0.1:8787'),
+    'http://127.0.0.1:8787/api/realtime-webrtc/client-logs',
   );
 });
 
@@ -39,6 +44,30 @@ test('postRealtimeClientLogs skips empty or inactive sessions', async () => {
   });
 
   assert.equal(accepted, 0);
+});
+
+test('postRealtimeClientLogs sends diagnostic logs before a session exists', async () => {
+  let capturedRequest: { body?: string; url?: string } = {};
+
+  const accepted = await postRealtimeClientLogs({
+    backendBaseUrl: 'http://127.0.0.1:8787',
+    entries: [{ event: 'Backend Health Check Started', timestamp: '2026-04-24T00:00:00.000Z' }],
+    fetcher: (async (input, init) => {
+      capturedRequest = {
+        body: String(init?.body),
+        url: String(input),
+      };
+      return new Response(JSON.stringify({ accepted: 1 }), { status: 200 });
+    }) as typeof fetch,
+    sessionId: null,
+    source: 'tap-rehearsal',
+  });
+
+  assert.equal(accepted, 1);
+  assert.equal(
+    capturedRequest.url,
+    'http://127.0.0.1:8787/api/realtime-webrtc/client-logs',
+  );
 });
 
 test('postRealtimeClientLogs sends a capped batch to the backend', async () => {

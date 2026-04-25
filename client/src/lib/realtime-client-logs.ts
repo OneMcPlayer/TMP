@@ -19,6 +19,10 @@ export function buildRealtimeClientLogsUrl(
   )}/client-logs`;
 }
 
+export function buildRealtimeClientDiagnosticsLogsUrl(backendBaseUrl: string): string {
+  return `${backendBaseUrl}/api/realtime-webrtc/client-logs`;
+}
+
 export function buildRealtimeSessionsUrl(backendBaseUrl: string): string {
   return `${backendBaseUrl}/api/realtime-webrtc/sessions`;
 }
@@ -37,12 +41,15 @@ export async function postRealtimeClientLogs({
   sessionId,
   source,
 }: PostRealtimeClientLogsOptions): Promise<number> {
-  if (!backendBaseUrl || !sessionId || entries.length === 0) {
+  if (!backendBaseUrl || entries.length === 0) {
     return 0;
   }
 
   const batch = entries.slice(0, MAX_REALTIME_CLIENT_LOG_BATCH_SIZE);
-  const response = await fetcher(buildRealtimeClientLogsUrl(backendBaseUrl, sessionId), {
+  const clientLogsUrl = sessionId
+    ? buildRealtimeClientLogsUrl(backendBaseUrl, sessionId)
+    : buildRealtimeClientDiagnosticsLogsUrl(backendBaseUrl);
+  const response = await fetcher(clientLogsUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

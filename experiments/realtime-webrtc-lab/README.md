@@ -62,6 +62,7 @@ The `#/tap-rehearsal` route reuses this backend with a stricter rehearsal contra
 
 Backend-assisted pages automatically POST browser debug events to:
 
+- `/api/realtime-webrtc/client-logs`
 - `/api/realtime-webrtc/sessions/:sessionId/client-logs`
 
 Those client events are folded into the same session log stream returned by:
@@ -79,6 +80,7 @@ The backend also appends every session log entry to:
 Override that location with `REALTIME_SESSION_LOG_FILE=/path/to/file.jsonl` when starting the backend.
 
 That makes a backend log export useful without manually copying the client report after every run.
+Pre-session logs use the sessionless endpoint so backend URL checks, microphone setup, and failed starts can still be inspected from the server-side JSONL file.
 
 ## Why this exists
 

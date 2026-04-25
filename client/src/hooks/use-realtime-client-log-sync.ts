@@ -26,7 +26,9 @@ export function useRealtimeClientLogSync({
   entriesRef.current = entries;
 
   useEffect(() => {
-    const nextSessionKey = backendBaseUrl && sessionId ? `${backendBaseUrl}::${sessionId}` : null;
+    const nextSessionKey = backendBaseUrl
+      ? `${backendBaseUrl}::${sessionId ?? 'pre-session'}`
+      : null;
     if (activeSessionKeyRef.current !== nextSessionKey) {
       activeSessionKeyRef.current = nextSessionKey;
       syncedCountRef.current = 0;
@@ -34,7 +36,7 @@ export function useRealtimeClientLogSync({
   }, [backendBaseUrl, sessionId]);
 
   useEffect(() => {
-    if (!backendBaseUrl || !sessionId || isSyncingRef.current) {
+    if (!backendBaseUrl || isSyncingRef.current) {
       return;
     }
 

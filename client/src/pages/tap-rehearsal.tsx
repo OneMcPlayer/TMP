@@ -309,6 +309,8 @@ export default function TapRehearsalPage() {
   const [backendHealth, setBackendHealth] = useState<BackendHealthSnapshot | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [callId, setCallId] = useState<string | null>(null);
+  const [lastSessionId, setLastSessionId] = useState<string | null>(null);
+  const [lastCallId, setLastCallId] = useState<string | null>(null);
   const [connectionState, setConnectionState] = useState<RTCPeerConnectionState | 'closed'>('closed');
   const [iceConnectionState, setIceConnectionState] = useState<RTCIceConnectionState | 'closed'>('closed');
   const [iceGatheringState, setIceGatheringState] = useState<RTCIceGatheringState>('new');
@@ -351,7 +353,7 @@ export default function TapRehearsalPage() {
   );
 
   useRealtimeClientLogSync({
-    backendBaseUrl: activeBackendBaseUrlRef.current,
+    backendBaseUrl: activeBackendBaseUrlRef.current ?? normalizedBackendUrl,
     entries: localLogs,
     sessionId,
     source: 'tap-rehearsal',
@@ -368,6 +370,8 @@ export default function TapRehearsalPage() {
   const canStartSession = Boolean(script && selectedCharacter && normalizedBackendUrl);
   const isBusyStarting = status === 'requesting-mic' || status === 'negotiating';
   const isLineDoneDisabled = !isTurnReady || isCommittingTurn || status !== 'connected';
+  const reportSessionId = sessionId ?? lastSessionId;
+  const reportCallId = callId ?? lastCallId;
 
   const addLocalLog = useCallback((event: string, details?: string) => {
     setLocalLogs((entries) => appendDebugLogEntry(entries, createDebugLogEntry(event, details)));
@@ -1131,6 +1135,8 @@ export default function TapRehearsalPage() {
       sessionIdRef.current = payload.sessionId;
       setSessionId(payload.sessionId);
       setCallId(payload.callId);
+      setLastSessionId(payload.sessionId);
+      setLastCallId(payload.callId);
       addLocalLog(
         'Tap Rehearsal Call Created',
         `session=${payload.sessionId} | call=${payload.callId ?? 'none'} | model=${payload.model} | mode=${payload.mode ?? 'default'}`,
@@ -1187,7 +1193,7 @@ export default function TapRehearsalPage() {
   const handleDownloadReport = useCallback(() => {
     const report = buildTapRehearsalReport({
       backendBaseUrl: activeBackendBaseUrlRef.current ?? normalizedBackendUrl ?? backendUrlInput.trim(),
-      callId,
+      callId: reportCallId,
       connectionState,
       correction,
       currentLine,
@@ -1200,7 +1206,7 @@ export default function TapRehearsalPage() {
       localLogs,
       selectedCharacter: selectedCharacter ?? 'not selected',
       serverLogs,
-      sessionId,
+      sessionId: reportSessionId,
       signalingState,
       startLineNumber: clampedStartLineNumber,
       status,
@@ -1211,7 +1217,6 @@ export default function TapRehearsalPage() {
   }, [
     addLocalLog,
     backendUrlInput,
-    callId,
     clampedStartLineNumber,
     connectionState,
     correction,
@@ -1221,11 +1226,12 @@ export default function TapRehearsalPage() {
     iceGatheringState,
     isCommittingTurn,
     isTurnReady,
+    reportCallId,
+    reportSessionId,
     localLogs,
     normalizedBackendUrl,
     selectedCharacter,
     serverLogs,
-    sessionId,
     signalingState,
     status,
   ]);
@@ -1565,7 +1571,7 @@ export default function TapRehearsalPage() {
                 {buildTapRehearsalReport({
                   backendBaseUrl:
                     activeBackendBaseUrlRef.current ?? normalizedBackendUrl ?? backendUrlInput.trim(),
-                  callId,
+                  callId: reportCallId,
                   connectionState,
                   correction,
                   currentLine,
@@ -1578,7 +1584,7 @@ export default function TapRehearsalPage() {
                   localLogs,
                   selectedCharacter: selectedCharacter ?? 'not selected',
                   serverLogs,
-                  sessionId,
+                  sessionId: reportSessionId,
                   signalingState,
                   startLineNumber: clampedStartLineNumber,
                   status,
