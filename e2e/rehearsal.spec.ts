@@ -3,10 +3,390 @@ import { expect, test } from '@playwright/test';
 import {
   CAR_MODE_SCRIPT,
   completeDeviceSetup,
+  type MockScript,
   PARTNER_LEAD_SCRIPT,
   selectCharacter,
   setupRehearsalApp,
 } from './helpers/rehearsal-app';
+
+const TAP_REHEARSAL_SCRIPT: MockScript = {
+  title: 'Tap E2E',
+  author: 'Playwright',
+  language: 'en',
+  lines: [
+    { speaker: 'BOB', line: 'Correct first line.' },
+    { speaker: 'ALICE', line: 'Partner bridge.' },
+    { speaker: 'BOB', line: 'Second user line.' },
+  ],
+};
+
+const TAP_REHEARSAL_BACKEND_URL = 'https://tap-e2e.local';
+
+async function setupTapRealtimeBrowserMocks(page: Parameters<typeof setupRehearsalApp>[0]) {
+  await page.addInitScript((backendUrl) => {
+    localStorage.setItem('realtime_call_lab_backend_url', backendUrl);
+
+    class FakeRTCDataChannel extends EventTarget {
+      label: string;
+      readyState: RTCDataChannelState = 'connecting';
+
+      constructor(label: string) {
+        super();
+        this.label = label;
+      }
+
+      open() {
+        if (this.readyState === 'open') {
+          return;
+        }
+
+        this.readyState = 'open';
+        this.dispatchEvent(new Event('open'));
+      }
+
+      send(data: string) {
+        const parsedEvent = JSON.parse(data) as { type?: string };
+        void fetch(`${backendUrl}/__e2e-data-channel`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: data,
+        });
+
+        if (parsedEvent.type === 'input_audio_buffer.clear') {
+          window.setTimeout(() => {
+            this.dispatchEvent(
+              new MessageEvent('message', {
+                data: JSON.stringify({
+                  event_id: 'event_e2e_clear',
+                  type: 'input_audio_buffer.cleared',
+                }),
+              }),
+            );
+          }, 0);
+        }
+
+        if (parsedEvent.type === 'input_audio_buffer.commit') {
+          window.setTimeout(() => {
+            this.dispatchEvent(
+              new MessageEvent('message', {
+                data: JSON.stringify({
+                  event_id: 'event_e2e_commit',
+                  item_id: 'item_e2e_user_audio',
+                  type: 'input_audio_buffer.committed',
+                }),
+              }),
+            );
+          }, 0);
+        }
+      }
+
+      close() {
+        if (this.readyState === 'closed') {
+          return;
+        }
+
+        this.readyState = 'closed';
+        this.dispatchEvent(new Event('close'));
+      }
+    }
+
+    class FakeRTCPeerConnection extends EventTarget {
+      connectionState: RTCPeerConnectionState = 'new';
+      iceConnectionState: RTCIceConnectionState = 'new';
+      iceGatheringState: RTCIceGatheringState = 'new';
+      signalingState: RTCSignalingState = 'stable';
+      localDescription: RTCSessionDescriptionInit | null = null;
+      remoteDescription: RTCSessionDescriptionInit | null = null;
+      privateDataChannel: FakeRTCDataChannel | null = null;
+      privateSenders: Array<{ track: { stop: () => void } }> = [];
+
+      addTrack(track: { stop: () => void }) {
+        const sender = { track };
+        this.privateSenders.push(sender);
+        return sender;
+      }
+
+      createDataChannel(label: string) {
+        this.privateDataChannel = new FakeRTCDataChannel(label);
+        return this.privateDataChannel;
+      }
+
+      async createOffer() {
+        return {
+          sdp: 'v=0\r\ns=Tap E2E Offer\r\n',
+          type: 'offer' as RTCSdpType,
+        };
+      }
+
+      async setLocalDescription(description: RTCSessionDescriptionInit) {
+        this.localDescription = description;
+        this.signalingState = 'have-local-offer';
+        this.dispatchEvent(new Event('signalingstatechange'));
+        this.iceGatheringState = 'gathering';
+        this.dispatchEvent(new Event('icegatheringstatechange'));
+
+        window.setTimeout(() => {
+          this.iceGatheringState = 'complete';
+          this.dispatchEvent(new Event('icegatheringstatechange'));
+        }, 0);
+      }
+
+      async setRemoteDescription(description: RTCSessionDescriptionInit) {
+        this.remoteDescription = description;
+        this.signalingState = 'stable';
+        this.dispatchEvent(new Event('signalingstatechange'));
+        this.iceConnectionState = 'connected';
+        this.dispatchEvent(new Event('iceconnectionstatechange'));
+        this.connectionState = 'connected';
+        this.dispatchEvent(new Event('connectionstatechange'));
+        const trackEvent = new Event('track') as Event & {
+          streams: MediaStream[];
+          track: { kind: string };
+        };
+        Object.defineProperty(trackEvent, 'streams', {
+          configurable: true,
+          value: [new MediaStream()],
+        });
+        Object.defineProperty(trackEvent, 'track', {
+          configurable: true,
+          value: { kind: 'audio' },
+        });
+        this.dispatchEvent(trackEvent);
+        this.privateDataChannel?.open();
+      }
+
+      getSenders() {
+        return this.privateSenders;
+      }
+
+      close() {
+        this.connectionState = 'closed';
+        this.iceConnectionState = 'closed';
+        this.signalingState = 'closed';
+        this.privateDataChannel?.close();
+      }
+    }
+
+    Object.defineProperty(window, 'RTCPeerConnection', {
+      configurable: true,
+      writable: true,
+      value: FakeRTCPeerConnection,
+    });
+  }, TAP_REHEARSAL_BACKEND_URL);
+}
+
+async function setupTapRealtimeBackendMocks(page: Parameters<typeof setupRehearsalApp>[0]) {
+  let nextSpeechSeq = 1;
+  let correctionTimestamp = '2026-04-25T10:00:00.000Z';
+  let currentLine = {
+    character: 'BOB',
+    isUserLine: true,
+    lineNumber: 1,
+  };
+  let correction: null | {
+    accuracy: number;
+    attempts: number;
+    expectedText: string;
+    lineNumber: number;
+    spokenText: string;
+    timestamp: string;
+  } = null;
+  let speech = [
+    {
+      purpose: 'user-turn-cue',
+      seq: nextSpeechSeq++,
+      text: 'Your line.',
+      timestamp: '2026-04-25T10:00:00.000Z',
+    },
+  ];
+  let committedWrongLine = false;
+
+  await page.route(`${TAP_REHEARSAL_BACKEND_URL}/**`, async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const corsHeaders = {
+      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+      'Access-Control-Allow-Origin': '*',
+    };
+
+    if (request.method() === 'OPTIONS') {
+      await route.fulfill({ headers: corsHeaders, status: 204 });
+      return;
+    }
+
+    if (url.pathname === '/health') {
+      await route.fulfill({
+        contentType: 'application/json',
+        headers: corsHeaders,
+        body: JSON.stringify({
+          ok: true,
+          openAiConfigured: true,
+          uptimeSeconds: 10,
+        }),
+      });
+      return;
+    }
+
+    if (url.pathname === '/api/realtime-webrtc/live-memorization/calls') {
+      nextSpeechSeq = 2;
+      correctionTimestamp = '2026-04-25T10:00:00.000Z';
+      committedWrongLine = false;
+      currentLine = {
+        character: 'BOB',
+        isUserLine: true,
+        lineNumber: 1,
+      };
+      correction = null;
+      speech = [
+        {
+          purpose: 'user-turn-cue',
+          seq: 1,
+          text: 'Your line.',
+          timestamp: '2026-04-25T10:00:00.000Z',
+        },
+      ];
+      await route.fulfill({
+        contentType: 'application/json',
+        headers: corsHeaders,
+        body: JSON.stringify({
+          answerSdp: 'v=0\r\ns=Tap E2E Answer\r\n',
+          callId: 'rtc_e2e',
+          mode: 'live-memorization',
+          model: 'gpt-realtime',
+          sessionId: 'tap-e2e-session',
+          voice: 'alloy',
+        }),
+      });
+      return;
+    }
+
+    if (url.pathname === '/__e2e-data-channel') {
+      const payload = request.postDataJSON() as { type?: string };
+      if (payload.type === 'input_audio_buffer.commit' && !committedWrongLine) {
+        committedWrongLine = true;
+        correctionTimestamp = '2026-04-25T10:00:01.000Z';
+        correction = {
+          accuracy: 0,
+          attempts: 1,
+          expectedText: 'Correct first line.',
+          lineNumber: 1,
+          spokenText: 'Wrong first line.',
+          timestamp: correctionTimestamp,
+        };
+        speech.push({
+          purpose: 'correction',
+          seq: nextSpeechSeq++,
+          text: 'Your line is: Correct first line.',
+          timestamp: correctionTimestamp,
+        });
+      }
+
+      await route.fulfill({
+        contentType: 'application/json',
+        headers: corsHeaders,
+        body: JSON.stringify({ ok: true }),
+      });
+      return;
+    }
+
+    if (url.pathname.endsWith('/live-memorization/state')) {
+      const afterSpeechSeq = Number.parseInt(url.searchParams.get('afterSpeechSeq') ?? '0', 10);
+      await route.fulfill({
+        contentType: 'application/json',
+        headers: corsHeaders,
+        body: JSON.stringify({
+          callId: 'rtc_e2e',
+          correction,
+          currentLine,
+          currentLineNumber: currentLine.lineNumber,
+          speech: speech.filter((speechEvent) => speechEvent.seq > afterSpeechSeq),
+          status: 'connected',
+          turnCommitMode: 'manual',
+        }),
+      });
+      return;
+    }
+
+    if (url.pathname.endsWith('/live-memorization/control')) {
+      const payload = request.postDataJSON() as { command?: string };
+      if (payload.command === 'skip') {
+        correction = null;
+        currentLine = {
+          character: 'BOB',
+          isUserLine: true,
+          lineNumber: 3,
+        };
+        speech.push({
+          purpose: 'partner-cue',
+          seq: nextSpeechSeq++,
+          text: 'Partner bridge.',
+          timestamp: '2026-04-25T10:00:02.000Z',
+        });
+      }
+
+      await route.fulfill({
+        contentType: 'application/json',
+        headers: corsHeaders,
+        body: JSON.stringify({
+          ok: true,
+          queuedResponses: 1,
+          sessionId: 'tap-e2e-session',
+          status: 'connected',
+        }),
+      });
+      return;
+    }
+
+    if (url.pathname.includes('/live-memorization/speech/') && url.pathname.endsWith('/audio')) {
+      await route.fulfill({
+        contentType: 'audio/mpeg',
+        headers: corsHeaders,
+        body: 'tap-e2e-audio',
+      });
+      return;
+    }
+
+    if (url.pathname.endsWith('/logs')) {
+      await route.fulfill({
+        contentType: 'application/json',
+        headers: corsHeaders,
+        body: JSON.stringify({
+          callId: 'rtc_e2e',
+          logs: [],
+          sessionId: 'tap-e2e-session',
+          status: 'connected',
+        }),
+      });
+      return;
+    }
+
+    if (url.pathname.endsWith('/client-logs') || url.pathname === '/api/realtime-webrtc/client-logs') {
+      await route.fulfill({
+        contentType: 'application/json',
+        headers: corsHeaders,
+        body: JSON.stringify({ accepted: 1, ok: true }),
+      });
+      return;
+    }
+
+    if (url.pathname.endsWith('/end')) {
+      await route.fulfill({
+        contentType: 'application/json',
+        headers: corsHeaders,
+        body: JSON.stringify({ ok: true }),
+      });
+      return;
+    }
+
+    await route.fulfill({
+      contentType: 'application/json',
+      headers: corsHeaders,
+      status: 404,
+      body: JSON.stringify({ error: `Unhandled tap backend mock path: ${url.pathname}` }),
+    });
+  });
+}
 
 test.describe('rehearsal browser e2e', () => {
   test('opens the audio lab wizard, records media control events, and keeps the log for export', async ({
@@ -75,6 +455,36 @@ test.describe('rehearsal browser e2e', () => {
     await expect(page.getByTestId('tap-rehearsal-page')).toBeVisible();
     await expect(page.getByText('Stage Mode Prototype')).toBeVisible();
     await expect(page.getByTestId('button-tap-rehearsal-start')).toBeVisible();
+  });
+
+  test('tap rehearsal recovers after a spoken correction and can skip forward', async ({
+    page,
+  }) => {
+    await setupTapRealtimeBrowserMocks(page);
+    await setupTapRealtimeBackendMocks(page);
+    await setupRehearsalApp(page, {
+      script: TAP_REHEARSAL_SCRIPT,
+      selectedCharacter: 'BOB',
+      startUrl: process.env.PLAYWRIGHT_START_URL ?? '/',
+    });
+
+    await page.getByTestId('button-open-tap-rehearsal').click();
+    await page.getByTestId('button-tap-rehearsal-start').click();
+
+    const lineDoneButton = page.getByTestId('button-tap-rehearsal-line-done');
+    await expect(lineDoneButton).toContainText('Line Done');
+    await lineDoneButton.click();
+
+    await expect(page.getByTestId('tap-rehearsal-correction')).toContainText('Correct first line.');
+    await expect(lineDoneButton).toContainText('Line Done');
+    await expect(lineDoneButton).toBeEnabled();
+
+    await page.getByTestId('button-tap-rehearsal-skip').click();
+
+    await expect(page.getByTestId('tap-rehearsal-correction')).toBeHidden();
+    await expect(page.getByText('Line 3')).toBeVisible();
+    await expect(lineDoneButton).toContainText('Line Done');
+    await expect(lineDoneButton).toBeEnabled();
   });
 
   test('keeps the settings button available on the launch screen', async ({ page }) => {

@@ -20,7 +20,7 @@ import {
 } from '@/lib/realtime-client-logs';
 import { REALTIME_CALL_LAB_BACKEND_STORAGE_KEY, normalizeRealtimeCallLabBackendUrl, serializeRealtimeServerLogs, summarizeRealtimeEvent, type RealtimeServerLogEntry } from '@/lib/realtime-call-lab';
 import { normalizeScript } from '@/lib/script-utils';
-import { buildTapUserTurnKey, canOpenTapUserTurn, shouldStartTapCoachCueGate } from '@/lib/tap-rehearsal-turn';
+import { buildTapUserTurnKey, canOpenTapUserTurn, shouldResolveTapCommittedLine, shouldStartTapCoachCueGate } from '@/lib/tap-rehearsal-turn';
 import type { RawScript, Script } from '@/lib/types';
 import { APP_VERSION } from '@/lib/version';
 import { AlertCircle, ArrowLeft, Check, Download, Loader2, Mic, Server, SkipForward, Square, Theater, Wifi } from 'lucide-react';
@@ -681,11 +681,11 @@ export default function TapRehearsalPage() {
       appendSpeechEvents(payload.speech ?? []);
 
       if (
-        isCommittingTurn &&
-        (!nextLine ||
-          Boolean(payload.correction) ||
-          (committedLineNumberRef.current !== null &&
-            nextLine.lineNumber !== committedLineNumberRef.current))
+        shouldResolveTapCommittedLine({
+          committedLineNumber: committedLineNumberRef.current,
+          currentLine: nextLine,
+          hasCorrection: Boolean(payload.correction),
+        })
       ) {
         setIsCommittingTurn(false);
         committedLineNumberRef.current = null;
@@ -714,7 +714,7 @@ export default function TapRehearsalPage() {
       lastBackendPollErrorRef.current = message;
       addLocalLog('Backend State Poll Failed', message);
     }
-  }, [addLocalLog, appendSpeechEvents, isCommittingTurn, status]);
+  }, [addLocalLog, appendSpeechEvents, status]);
 
   const startPolling = useCallback(() => {
     clearPolling();

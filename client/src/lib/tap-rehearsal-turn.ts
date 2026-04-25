@@ -32,6 +32,19 @@ export function shouldStartTapCoachCueGate(options: {
   );
 }
 
+export function shouldResolveTapCommittedLine(options: {
+  committedLineNumber: number | null;
+  currentLine: TapRehearsalTurnLine | null;
+  hasCorrection: boolean;
+}): boolean {
+  return Boolean(
+    options.committedLineNumber !== null &&
+      (!options.currentLine ||
+        options.hasCorrection ||
+        options.currentLine.lineNumber !== options.committedLineNumber),
+  );
+}
+
 export function canOpenTapUserTurn(options: {
   coachAudioPlaying: boolean;
   currentLine: TapRehearsalTurnLine | null;

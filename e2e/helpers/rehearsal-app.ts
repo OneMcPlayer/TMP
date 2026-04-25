@@ -26,6 +26,7 @@ export interface RehearsalAppOptions {
   rejectAudioPlayCallNumber?: number;
   script?: MockScript;
   selectedCharacter?: string | null;
+  startUrl?: string;
   transcriptionText?: string;
   wakeLockSupported?: boolean;
 }
@@ -68,6 +69,7 @@ export async function setupRehearsalApp(
     rejectAudioPlayCallNumber = -1,
     script = PARTNER_LEAD_SCRIPT,
     selectedCharacter = null,
+    startUrl = '/',
     transcriptionText = 'My cue line.',
     wakeLockSupported = true,
   } = options;
@@ -223,7 +225,24 @@ export async function setupRehearsalApp(
         },
       });
 
-      const fakeTracks = [{ stop() {} }];
+      const fakeTracks = [
+        {
+          enabled: true,
+          id: 'e2e-audio-track',
+          kind: 'audio',
+          label: 'E2E audio track',
+          readyState: 'live',
+          stop() {},
+        },
+      ];
+      const fakeStream = {
+        getAudioTracks() {
+          return fakeTracks;
+        },
+        getTracks() {
+          return fakeTracks;
+        },
+      };
       const mediaDevices = navigator.mediaDevices ?? {};
       let resolveControlledGetUserMedia:
         | (() => void)
@@ -246,20 +265,12 @@ export async function setupRehearsalApp(
           if (initMicrophoneMode === 'controlled') {
             return new Promise((resolve) => {
               resolveControlledGetUserMedia = () => {
-                resolve({
-                  getTracks() {
-                    return fakeTracks;
-                  },
-                });
+                resolve(fakeStream);
               };
             });
           }
 
-          return Promise.resolve({
-            getTracks() {
-              return fakeTracks;
-            },
-          });
+          return Promise.resolve(fakeStream);
         },
       });
       Object.defineProperty(navigator, 'mediaDevices', {
@@ -411,7 +422,7 @@ export async function setupRehearsalApp(
     });
   });
 
-  await page.goto('/');
+  await page.goto(startUrl);
 }
 
 export async function completeDeviceSetup(page: Page): Promise<void> {

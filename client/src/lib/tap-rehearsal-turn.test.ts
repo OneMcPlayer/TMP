@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   buildTapUserTurnKey,
   canOpenTapUserTurn,
+  shouldResolveTapCommittedLine,
   shouldStartTapCoachCueGate,
 } from './tap-rehearsal-turn';
 
@@ -100,5 +101,40 @@ test('canOpenTapUserTurn waits until coach cue speech is complete', () => {
       isWaitingForCoachCue: false,
     }),
     false,
+  );
+});
+
+test('shouldResolveTapCommittedLine resolves checking after correction or line movement', () => {
+  assert.equal(
+    shouldResolveTapCommittedLine({
+      committedLineNumber: null,
+      currentLine: { isUserLine: true, lineNumber: 2 },
+      hasCorrection: true,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldResolveTapCommittedLine({
+      committedLineNumber: 2,
+      currentLine: { isUserLine: true, lineNumber: 2 },
+      hasCorrection: false,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldResolveTapCommittedLine({
+      committedLineNumber: 2,
+      currentLine: { isUserLine: true, lineNumber: 2 },
+      hasCorrection: true,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldResolveTapCommittedLine({
+      committedLineNumber: 2,
+      currentLine: { isUserLine: false, lineNumber: 3 },
+      hasCorrection: false,
+    }),
+    true,
   );
 });
