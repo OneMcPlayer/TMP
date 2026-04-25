@@ -20,6 +20,7 @@ import {
 } from '@/lib/realtime-client-logs';
 import { REALTIME_CALL_LAB_BACKEND_STORAGE_KEY, normalizeRealtimeCallLabBackendUrl, serializeRealtimeServerLogs, summarizeRealtimeEvent, type RealtimeServerLogEntry } from '@/lib/realtime-call-lab';
 import { normalizeScript } from '@/lib/script-utils';
+import { buildTapUserTurnKey, canOpenTapUserTurn, shouldStartTapCoachCueGate } from '@/lib/tap-rehearsal-turn';
 import type { RawScript, Script } from '@/lib/types';
 import { APP_VERSION } from '@/lib/version';
 import { AlertCircle, ArrowLeft, Check, Download, Loader2, Mic, Server, SkipForward, Square, Theater, Wifi } from 'lucide-react';
@@ -243,6 +244,7 @@ function buildTapRehearsalReport(options: {
   iceGatheringState: string;
   isCommittingTurn: boolean;
   isTurnReady: boolean;
+  isWaitingForCoachCue: boolean;
   localLogs: DebugLogEntry[];
   selectedCharacter: string;
   serverLogs: RealtimeServerLogEntry[];
@@ -277,6 +279,7 @@ function buildTapRehearsalReport(options: {
     `Signaling: ${options.signalingState}`,
     `Data channel: ${options.dataChannelState}`,
     `Current line: ${options.currentLine ? `${options.currentLine.lineNumber} ${options.currentLine.character}` : 'done'}`,
+    `Coach cue pending: ${options.isWaitingForCoachCue ? 'yes' : 'no'}`,
     `Turn ready: ${options.isTurnReady ? 'yes' : 'no'}`,
     `Turn committing: ${options.isCommittingTurn ? 'yes' : 'no'}`,
     `Correction: ${options.correction ? `${options.correction.lineNumber} at ${options.correction.accuracy}%` : 'none'}`,
@@ -320,6 +323,7 @@ export default function TapRehearsalPage() {
   const [correction, setCorrection] = useState<TapRehearsalCorrection | null>(null);
   const [coachAudioPlaying, setCoachAudioPlaying] = useState(false);
   const [speechQueueLength, setSpeechQueueLength] = useState(0);
+  const [isWaitingForCoachCue, setIsWaitingForCoachCue] = useState(false);
   const [isTurnReady, setIsTurnReady] = useState(false);
   const [isCommittingTurn, setIsCommittingTurn] = useState(false);
   const [localLogs, setLocalLogs] = useState<DebugLogEntry[]>([]);
@@ -344,6 +348,9 @@ export default function TapRehearsalPage() {
   const currentSpeechRef = useRef<LiveMemorizationSpeechEvent | null>(null);
   const isDrainingSpeechQueueRef = useRef(false);
   const lastOpenedTurnKeyRef = useRef<string | null>(null);
+  const pendingCoachCueTurnKeyRef = useRef<string | null>(null);
+  const completedCoachCueTurnKeyRef = useRef<string | null>(null);
+  const didReceivePendingCoachSpeechRef = useRef(false);
   const isOpeningTurnRef = useRef(false);
   const committedLineNumberRef = useRef<number | null>(null);
 
@@ -525,6 +532,17 @@ export default function TapRehearsalPage() {
     } finally {
       isDrainingSpeechQueueRef.current = false;
       setSpeechQueueLength(speechQueueRef.current.length);
+      if (
+        pendingCoachCueTurnKeyRef.current &&
+        didReceivePendingCoachSpeechRef.current &&
+        speechQueueRef.current.length === 0
+      ) {
+        addLocalLog('Coach Cue Completed', `turn=${pendingCoachCueTurnKeyRef.current}`);
+        completedCoachCueTurnKeyRef.current = pendingCoachCueTurnKeyRef.current;
+        pendingCoachCueTurnKeyRef.current = null;
+        didReceivePendingCoachSpeechRef.current = false;
+        setIsWaitingForCoachCue(false);
+      }
     }
   }, [addLocalLog, fetchSpeechAudio]);
 
@@ -541,6 +559,10 @@ export default function TapRehearsalPage() {
       lastSpeechSeqRef.current = freshSpeechEvents[freshSpeechEvents.length - 1].seq;
       speechQueueRef.current.push(...freshSpeechEvents);
       setSpeechQueueLength(speechQueueRef.current.length);
+      if (pendingCoachCueTurnKeyRef.current) {
+        didReceivePendingCoachSpeechRef.current = true;
+        setIsWaitingForCoachCue(true);
+      }
 
       for (const speechEvent of freshSpeechEvents) {
         addLocalLog(
@@ -623,8 +645,29 @@ export default function TapRehearsalPage() {
       }
 
       const nextLine = payload.currentLine ?? null;
+      const nextCorrection = payload.correction ?? null;
+      const nextTurnKey = buildTapUserTurnKey(nextLine, nextCorrection);
+      if (
+        shouldStartTapCoachCueGate({
+          completedCoachCueTurnKey: completedCoachCueTurnKeyRef.current,
+          lastOpenedTurnKey: lastOpenedTurnKeyRef.current,
+          pendingCoachCueTurnKey: pendingCoachCueTurnKeyRef.current,
+          turnKey: nextTurnKey,
+        })
+      ) {
+        pendingCoachCueTurnKeyRef.current = nextTurnKey;
+        didReceivePendingCoachSpeechRef.current = false;
+        setIsWaitingForCoachCue(true);
+        setIsTurnReady(false);
+        addLocalLog('Waiting For Coach Cue', `turn=${nextTurnKey}`);
+      } else if (!nextTurnKey) {
+        pendingCoachCueTurnKeyRef.current = null;
+        didReceivePendingCoachSpeechRef.current = false;
+        setIsWaitingForCoachCue(false);
+      }
+
       setCurrentLine(nextLine);
-      setCorrection(payload.correction ?? null);
+      setCorrection(nextCorrection);
       appendSpeechEvents(payload.speech ?? []);
 
       if (
@@ -680,6 +723,9 @@ export default function TapRehearsalPage() {
       speechAudioFetchRef.current.clear();
       lastSpeechSeqRef.current = 0;
       lastOpenedTurnKeyRef.current = null;
+      pendingCoachCueTurnKeyRef.current = null;
+      completedCoachCueTurnKeyRef.current = null;
+      didReceivePendingCoachSpeechRef.current = false;
       committedLineNumberRef.current = null;
 
       const activeBackendBaseUrl = activeBackendBaseUrlRef.current;
@@ -760,6 +806,7 @@ export default function TapRehearsalPage() {
       setCorrection(null);
       setCoachAudioPlaying(false);
       setSpeechQueueLength(0);
+      setIsWaitingForCoachCue(false);
       setIsTurnReady(false);
       setIsCommittingTurn(false);
     },
@@ -783,19 +830,22 @@ export default function TapRehearsalPage() {
 
   const openCurrentUserTurn = useCallback(() => {
     if (
-      status !== 'connected' ||
-      dataChannelState !== 'open' ||
-      !currentLine?.isUserLine ||
-      coachAudioPlaying ||
-      speechQueueLength > 0 ||
-      isCommittingTurn ||
-      isOpeningTurnRef.current
+      !canOpenTapUserTurn({
+        coachAudioPlaying,
+        currentLine,
+        dataChannelState,
+        isCommittingTurn,
+        isOpeningTurn: isOpeningTurnRef.current,
+        isWaitingForCoachCue,
+        speechQueueLength,
+        status,
+      })
     ) {
       return;
     }
 
-    const turnKey = `${currentLine.lineNumber}:${correction?.timestamp ?? 'clean'}`;
-    if (lastOpenedTurnKeyRef.current === turnKey) {
+    const turnKey = buildTapUserTurnKey(currentLine, correction);
+    if (!turnKey || lastOpenedTurnKeyRef.current === turnKey) {
       return;
     }
 
@@ -821,6 +871,7 @@ export default function TapRehearsalPage() {
     currentLine,
     dataChannelState,
     isCommittingTurn,
+    isWaitingForCoachCue,
     sendRealtimeEvent,
     speechQueueLength,
     status,
@@ -888,8 +939,12 @@ export default function TapRehearsalPage() {
         if (command === 'skip') {
           setIsTurnReady(false);
           setIsCommittingTurn(false);
+          setIsWaitingForCoachCue(false);
           setCorrection(null);
           lastOpenedTurnKeyRef.current = null;
+          pendingCoachCueTurnKeyRef.current = null;
+          completedCoachCueTurnKeyRef.current = null;
+          didReceivePendingCoachSpeechRef.current = false;
         }
 
         addLocalLog('Control Command Sent', command);
@@ -1202,6 +1257,7 @@ export default function TapRehearsalPage() {
       iceConnectionState,
       iceGatheringState,
       isCommittingTurn,
+      isWaitingForCoachCue,
       isTurnReady,
       localLogs,
       selectedCharacter: selectedCharacter ?? 'not selected',
@@ -1225,6 +1281,7 @@ export default function TapRehearsalPage() {
     iceConnectionState,
     iceGatheringState,
     isCommittingTurn,
+    isWaitingForCoachCue,
     isTurnReady,
     reportCallId,
     reportSessionId,
@@ -1314,6 +1371,10 @@ export default function TapRehearsalPage() {
       return 'Listen';
     }
 
+    if (isWaitingForCoachCue) {
+      return 'Preparing';
+    }
+
     if (!currentLine.isUserLine) {
       return 'Advancing';
     }
@@ -1323,7 +1384,15 @@ export default function TapRehearsalPage() {
     }
 
     return isTurnReady ? 'Your turn' : 'Preparing';
-  }, [coachAudioPlaying, currentLine, isCommittingTurn, isTurnReady, speechQueueLength, status]);
+  }, [
+    coachAudioPlaying,
+    currentLine,
+    isCommittingTurn,
+    isTurnReady,
+    isWaitingForCoachCue,
+    speechQueueLength,
+    status,
+  ]);
 
   return (
     <div data-testid="tap-rehearsal-page" className="min-h-screen bg-background text-foreground">
@@ -1483,6 +1552,9 @@ export default function TapRehearsalPage() {
                 <Badge variant={coachAudioPlaying ? 'secondary' : 'outline'}>
                   coach {coachAudioPlaying ? 'speaking' : 'silent'}
                 </Badge>
+                <Badge variant={isWaitingForCoachCue ? 'secondary' : 'outline'}>
+                  cue {isWaitingForCoachCue ? 'pending' : 'ready'}
+                </Badge>
               </div>
 
               <div className="flex gap-2">
@@ -1580,6 +1652,7 @@ export default function TapRehearsalPage() {
                   iceConnectionState,
                   iceGatheringState,
                   isCommittingTurn,
+                  isWaitingForCoachCue,
                   isTurnReady,
                   localLogs,
                   selectedCharacter: selectedCharacter ?? 'not selected',
