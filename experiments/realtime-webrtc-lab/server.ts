@@ -129,6 +129,11 @@ type LiveMemorizationControlBody = {
   command?: LiveMemorizationCommand;
 };
 
+type LiveMemorizationAudioAttemptBody = {
+  audioBase64?: unknown;
+  mimeType?: unknown;
+};
+
 type ClientLogsBody = {
   entries?: ClientLogEntry[];
   source?: unknown;
@@ -167,7 +172,7 @@ const REALTIME_SESSION_LOG_FILE =
 const app = express();
 const sessions = new Map<string, RealtimeLabSession>();
 
-app.use(express.json({ limit: '5mb' }));
+app.use(express.json({ limit: '25mb' }));
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -573,6 +578,49 @@ function buildLiveMemorizationSessionConfiguration(
   };
 }
 
+function buildLiveMemorizationStatePayload(
+  session: LiveMemorizationRealtimeLabSession,
+  afterSpeechSeq: number,
+) {
+  const currentLine = getCurrentLiveMemorizationLine(session.liveMemorization.controller);
+
+  return {
+    callId: session.callId,
+    correction: session.liveMemorization.lastCorrection,
+    currentLine: currentLine
+      ? {
+          character: currentLine.character,
+          isUserLine: currentLine.isUserLine,
+          lineNumber: currentLine.lineNumber,
+        }
+      : null,
+    currentLineNumber: currentLine?.lineNumber ?? null,
+    speech: buildPublicSpeechEvents(session.speechEvents, afterSpeechSeq),
+    status: session.status,
+    turnCommitMode: session.liveMemorization.turnCommitMode,
+  };
+}
+
+function audioFilenameForMimeType(mimeType: string): string {
+  if (mimeType.includes('mp4')) {
+    return 'line-attempt.mp4';
+  }
+
+  if (mimeType.includes('mpeg') || mimeType.includes('mp3')) {
+    return 'line-attempt.mp3';
+  }
+
+  if (mimeType.includes('wav')) {
+    return 'line-attempt.wav';
+  }
+
+  if (mimeType.includes('ogg')) {
+    return 'line-attempt.ogg';
+  }
+
+  return 'line-attempt.webm';
+}
+
 function sendSidebandEvent(
   session: RealtimeLabSession,
   event: Record<string, unknown>,
@@ -877,6 +925,98 @@ function handleLiveMemorizationControlCommand(
   queueLiveMemorizationStep(session, 'continue');
 }
 
+function processLiveMemorizationAttemptTranscript(
+  session: LiveMemorizationRealtimeLabSession,
+  itemId: string,
+  transcript: string,
+): void {
+  const liveMemorizationState = session.liveMemorization;
+  const outcome = processLiveMemorizationTranscript(
+    liveMemorizationState.controller,
+    transcript,
+  );
+
+  switch (outcome.type) {
+    case 'accepted':
+      appendSessionLog(
+        session,
+        'info',
+        'Line Accepted',
+        `item=${itemId} | accuracy=${outcome.evaluation.accuracy}% | transcript=${transcript}`,
+      );
+      liveMemorizationState.lastCorrection = null;
+      queueLiveMemorizationStep(session, 'accepted');
+      break;
+    case 'retry':
+      appendSessionLog(
+        session,
+        'info',
+        'Line Retry Requested',
+        `item=${itemId} | accuracy=${outcome.evaluation.accuracy}% | remaining=${outcome.attemptsRemaining} | transcript=${transcript}`,
+      );
+      enqueueSessionSpeech(
+        session,
+        outcome.attemptsRemaining === 1 ? 'Almost. One more try.' : 'Not yet. Try again.',
+        'retry',
+      );
+      break;
+    case 'reveal-and-retry':
+      liveMemorizationState.lastCorrection = {
+        accuracy: outcome.evaluation.accuracy,
+        attempts: outcome.attempts,
+        expectedText: outcome.revealText,
+        lineNumber: getCurrentLiveMemorizationLine(liveMemorizationState.controller)?.lineNumber ?? 0,
+        spokenText: transcript,
+        timestamp: formatTimestamp(),
+      };
+      appendSessionLog(
+        session,
+        'info',
+        'Line Correction Revealed',
+        `item=${itemId} | accuracy=${outcome.evaluation.accuracy}% | attempts=${outcome.attempts} | transcript=${transcript}`,
+      );
+      enqueueSessionSpeech(
+        session,
+        `Your line is: ${outcome.revealText}`,
+        'correction',
+      );
+      break;
+    case 'reveal-and-advance':
+      appendSessionLog(
+        session,
+        'info',
+        'Line Revealed After Max Attempts',
+        `item=${itemId} | accuracy=${outcome.evaluation.accuracy}% | transcript=${transcript}`,
+      );
+      enqueueSessionSpeech(
+        session,
+        `Your line is: ${outcome.revealText}`,
+        'reveal-after-max-attempts',
+      );
+      queueLiveMemorizationStep(session, 'continue');
+      break;
+    case 'control':
+      appendSessionLog(
+        session,
+        'info',
+        'Voice Control Detected',
+        `item=${itemId} | command=${outcome.command} | transcript=${transcript}`,
+      );
+      handleLiveMemorizationControlCommand(session, outcome.command, 'voice');
+      break;
+    case 'ignored':
+      appendSessionLog(
+        session,
+        'info',
+        'Transcript Ignored',
+        `item=${itemId} | reason=${outcome.reason} | transcript=${transcript}`,
+      );
+      break;
+    default:
+      break;
+  }
+}
+
 function flushLiveMemorizationTranscriptions(
   session: LiveMemorizationRealtimeLabSession,
 ): void {
@@ -892,91 +1032,7 @@ function flushLiveMemorizationTranscriptions(
 
     liveMemorizationState.committedItemIds.shift();
     liveMemorizationState.transcriptsByItemId.delete(itemId);
-
-    const outcome = processLiveMemorizationTranscript(
-      liveMemorizationState.controller,
-      transcript,
-    );
-
-    switch (outcome.type) {
-      case 'accepted':
-        appendSessionLog(
-          session,
-          'info',
-          'Line Accepted',
-          `item=${itemId} | accuracy=${outcome.evaluation.accuracy}% | transcript=${transcript}`,
-        );
-        liveMemorizationState.lastCorrection = null;
-        queueLiveMemorizationStep(session, 'accepted');
-        break;
-      case 'retry':
-        appendSessionLog(
-          session,
-          'info',
-          'Line Retry Requested',
-          `item=${itemId} | accuracy=${outcome.evaluation.accuracy}% | remaining=${outcome.attemptsRemaining} | transcript=${transcript}`,
-        );
-        enqueueSessionSpeech(
-          session,
-          outcome.attemptsRemaining === 1 ? 'Almost. One more try.' : 'Not yet. Try again.',
-          'retry',
-        );
-        break;
-      case 'reveal-and-retry':
-        liveMemorizationState.lastCorrection = {
-          accuracy: outcome.evaluation.accuracy,
-          attempts: outcome.attempts,
-          expectedText: outcome.revealText,
-          lineNumber: getCurrentLiveMemorizationLine(liveMemorizationState.controller)?.lineNumber ?? 0,
-          spokenText: transcript,
-          timestamp: formatTimestamp(),
-        };
-        appendSessionLog(
-          session,
-          'info',
-          'Line Correction Revealed',
-          `item=${itemId} | accuracy=${outcome.evaluation.accuracy}% | attempts=${outcome.attempts} | transcript=${transcript}`,
-        );
-        enqueueSessionSpeech(
-          session,
-          `Your line is: ${outcome.revealText}`,
-          'correction',
-        );
-        break;
-      case 'reveal-and-advance':
-        appendSessionLog(
-          session,
-          'info',
-          'Line Revealed After Max Attempts',
-          `item=${itemId} | accuracy=${outcome.evaluation.accuracy}% | transcript=${transcript}`,
-        );
-        enqueueSessionSpeech(
-          session,
-          `Your line is: ${outcome.revealText}`,
-          'reveal-after-max-attempts',
-        );
-        queueLiveMemorizationStep(session, 'continue');
-        break;
-      case 'control':
-        appendSessionLog(
-          session,
-          'info',
-          'Voice Control Detected',
-          `item=${itemId} | command=${outcome.command} | transcript=${transcript}`,
-        );
-        handleLiveMemorizationControlCommand(session, outcome.command, 'voice');
-        break;
-      case 'ignored':
-        appendSessionLog(
-          session,
-          'info',
-          'Transcript Ignored',
-          `item=${itemId} | reason=${outcome.reason} | transcript=${transcript}`,
-        );
-        break;
-      default:
-        break;
-    }
+    processLiveMemorizationAttemptTranscript(session, itemId, transcript);
   }
 }
 
@@ -1476,6 +1532,139 @@ app.post('/api/realtime-webrtc/sessions/:sessionId/live-memorization/control', (
   });
 });
 
+app.post(
+  '/api/realtime-webrtc/sessions/:sessionId/live-memorization/audio-attempt',
+  async (req, res) => {
+    const session = sessions.get(req.params.sessionId);
+    if (!session || !isLiveMemorizationSession(session)) {
+      res.status(404).json({
+        error: 'Live memorization session not found.',
+      });
+      return;
+    }
+
+    if (!OPENAI_API_KEY) {
+      res.status(500).json({
+        error: 'OPENAI_API_KEY is not configured on the experiment server.',
+      });
+      return;
+    }
+
+    const currentLine = getCurrentLiveMemorizationLine(session.liveMemorization.controller);
+    if (!currentLine?.isUserLine) {
+      res.status(409).json({
+        error: 'The live memorization session is not waiting for a user line.',
+      });
+      return;
+    }
+
+    const { audioBase64, mimeType } = (req.body ?? {}) as LiveMemorizationAudioAttemptBody;
+    if (typeof audioBase64 !== 'string' || !audioBase64.trim()) {
+      res.status(400).json({
+        error: 'audioBase64 is required.',
+      });
+      return;
+    }
+
+    const safeMimeType =
+      typeof mimeType === 'string' && mimeType.trim() ? mimeType.trim() : 'audio/webm';
+    const audioBuffer = Buffer.from(audioBase64, 'base64');
+    if (audioBuffer.byteLength === 0) {
+      res.status(400).json({
+        error: 'Recorded audio was empty.',
+      });
+      return;
+    }
+
+    const itemId = `upload_${crypto.randomUUID()}`;
+    appendSessionLog(
+      session,
+      'info',
+      'Uploaded User Audio Received',
+      `item=${itemId} | bytes=${audioBuffer.byteLength} | mime=${safeMimeType}`,
+    );
+
+    try {
+      const audioBlob = new Blob([audioBuffer], { type: safeMimeType });
+      const formData = new FormData();
+      formData.set('file', audioBlob, audioFilenameForMimeType(safeMimeType));
+      formData.set('model', LIVE_MEMORIZATION_TRANSCRIPTION_MODEL);
+
+      const language = inferLanguageCode(session.liveMemorization.script.language);
+      if (language) {
+        formData.set('language', language);
+      }
+
+      formData.set(
+        'prompt',
+        buildTranscriptionPrompt(
+          session.liveMemorization.script,
+          session.liveMemorization.selectedCharacter,
+          currentLine.speakableText,
+        ),
+      );
+
+      const transcriptionResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${OPENAI_API_KEY}`,
+        },
+        body: formData,
+      });
+
+      const responseText = await transcriptionResponse.text();
+      appendSessionLog(
+        session,
+        transcriptionResponse.ok ? 'info' : 'error',
+        'Uploaded Audio Transcription Response',
+        `item=${itemId} | status=${transcriptionResponse.status} | bytes=${responseText.length}`,
+      );
+
+      if (!transcriptionResponse.ok) {
+        res.status(502).json({
+          error:
+            responseText ||
+            `OpenAI transcription failed with status ${transcriptionResponse.status}.`,
+        });
+        return;
+      }
+
+      let transcript = '';
+      try {
+        const payload = JSON.parse(responseText) as { text?: unknown };
+        transcript = typeof payload.text === 'string' ? payload.text.trim() : '';
+      } catch {
+        transcript = responseText.trim();
+      }
+
+      appendSessionLog(
+        session,
+        'info',
+        'Uploaded User Audio Transcribed',
+        `item=${itemId} | transcript=${transcript}`,
+      );
+      processLiveMemorizationAttemptTranscript(session, itemId, transcript);
+
+      res.json({
+        ok: true,
+        sessionId: session.id,
+        transcript,
+        ...buildLiveMemorizationStatePayload(session, 0),
+      });
+    } catch (error) {
+      appendSessionLog(
+        session,
+        'error',
+        'Uploaded Audio Attempt Failed',
+        `item=${itemId} | ${error instanceof Error ? error.message : 'Unknown audio-attempt error'}`,
+      );
+      res.status(500).json({
+        error: error instanceof Error ? error.message : 'Unknown audio-attempt error',
+      });
+    }
+  },
+);
+
 app.get('/api/realtime-webrtc/sessions/:sessionId/live-memorization/state', (req, res) => {
   const session = sessions.get(req.params.sessionId);
   if (!session || !isLiveMemorizationSession(session)) {
@@ -1487,23 +1676,7 @@ app.get('/api/realtime-webrtc/sessions/:sessionId/live-memorization/state', (req
 
   const afterSpeechSeq = Number.parseInt(String(req.query.afterSpeechSeq ?? '0'), 10);
   const safeAfterSpeechSeq = Number.isFinite(afterSpeechSeq) ? afterSpeechSeq : 0;
-  const currentLine = getCurrentLiveMemorizationLine(session.liveMemorization.controller);
-
-  res.json({
-    callId: session.callId,
-    correction: session.liveMemorization.lastCorrection,
-    currentLine: currentLine
-      ? {
-          character: currentLine.character,
-          isUserLine: currentLine.isUserLine,
-          lineNumber: currentLine.lineNumber,
-        }
-      : null,
-    currentLineNumber: currentLine?.lineNumber ?? null,
-    speech: buildPublicSpeechEvents(session.speechEvents, safeAfterSpeechSeq),
-    status: session.status,
-    turnCommitMode: session.liveMemorization.turnCommitMode,
-  });
+  res.json(buildLiveMemorizationStatePayload(session, safeAfterSpeechSeq));
 });
 
 app.get(

@@ -150,6 +150,41 @@ async function readResponseErrorMessage(response: Response): Promise<string> {
   return responseText;
 }
 
+function getPreferredRecordingMimeType(): string | undefined {
+  if (typeof MediaRecorder === 'undefined') {
+    return undefined;
+  }
+
+  const candidates = [
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/mp4',
+    'audio/ogg;codecs=opus',
+  ];
+
+  return candidates.find((mimeType) => MediaRecorder.isTypeSupported(mimeType));
+}
+
+function buildBlobFromChunks(chunks: Blob[], mimeType: string): Blob {
+  return new Blob(chunks, {
+    type: chunks[0]?.type || mimeType || 'audio/webm',
+  });
+}
+
+async function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener('load', () => {
+      const result = typeof reader.result === 'string' ? reader.result : '';
+      resolve(result.includes(',') ? result.split(',').pop() ?? '' : result);
+    });
+    reader.addEventListener('error', () => {
+      reject(reader.error ?? new Error('Failed to read recorded audio.'));
+    });
+    reader.readAsDataURL(blob);
+  });
+}
+
 async function waitForIceGatheringComplete(
   peerConnection: RTCPeerConnection,
   timeoutMs: number,
@@ -357,6 +392,10 @@ export default function TapRehearsalPage() {
   const didReceivePendingCoachSpeechRef = useRef(false);
   const isOpeningTurnRef = useRef(false);
   const committedLineNumberRef = useRef<number | null>(null);
+  const turnMediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const turnRecordingChunksRef = useRef<Blob[]>([]);
+  const turnRecordingMimeTypeRef = useRef('audio/webm');
+  const activeRecordingTurnKeyRef = useRef<string | null>(null);
 
   const normalizedBackendUrl = useMemo(
     () => normalizeRealtimeCallLabBackendUrl(backendUrlInput),
@@ -742,6 +781,16 @@ export default function TapRehearsalPage() {
       completedCoachCueTurnKeyRef.current = null;
       didReceivePendingCoachSpeechRef.current = false;
       committedLineNumberRef.current = null;
+      try {
+        if (turnMediaRecorderRef.current?.state === 'recording') {
+          turnMediaRecorderRef.current.stop();
+        }
+      } catch {
+        // Recording cleanup is best-effort during session shutdown.
+      }
+      turnMediaRecorderRef.current = null;
+      activeRecordingTurnKeyRef.current = null;
+      turnRecordingChunksRef.current = [];
 
       const activeBackendBaseUrl = activeBackendBaseUrlRef.current;
       const activeSessionId = sessionIdRef.current;
@@ -844,6 +893,164 @@ export default function TapRehearsalPage() {
     [addLocalLog],
   );
 
+  const startTurnRecording = useCallback(
+    (turnKey: string): boolean => {
+      const localStream = localStreamRef.current;
+      if (!localStream || typeof MediaRecorder === 'undefined') {
+        addLocalLog(
+          'Turn Recording Unavailable',
+          !localStream ? 'No local media stream is active.' : 'MediaRecorder is not supported.',
+        );
+        return false;
+      }
+
+      try {
+        if (turnMediaRecorderRef.current?.state === 'recording') {
+          turnMediaRecorderRef.current.stop();
+        }
+      } catch {
+        // A stale recorder should not block a fresh turn.
+      }
+
+      const mimeType = getPreferredRecordingMimeType() ?? 'audio/webm';
+      const recorderOptions = mimeType ? { mimeType } : undefined;
+
+      try {
+        const recorder = new MediaRecorder(localStream, recorderOptions);
+        turnRecordingChunksRef.current = [];
+        turnRecordingMimeTypeRef.current = recorder.mimeType || mimeType;
+        activeRecordingTurnKeyRef.current = turnKey;
+
+        recorder.ondataavailable = (event) => {
+          if (event.data.size > 0) {
+            turnRecordingChunksRef.current.push(event.data);
+          }
+        };
+        recorder.onerror = () => {
+          addLocalLog('Turn Recording Error', `turn=${turnKey}`);
+        };
+        recorder.start(250);
+        turnMediaRecorderRef.current = recorder;
+        addLocalLog(
+          'Turn Recording Started',
+          `turn=${turnKey} | mime=${turnRecordingMimeTypeRef.current}`,
+        );
+        return true;
+      } catch (error) {
+        turnMediaRecorderRef.current = null;
+        activeRecordingTurnKeyRef.current = null;
+        turnRecordingChunksRef.current = [];
+        addLocalLog(
+          'Turn Recording Failed',
+          error instanceof Error ? error.message : 'Unknown MediaRecorder error',
+        );
+        return false;
+      }
+    },
+    [addLocalLog],
+  );
+
+  const stopTurnRecording = useCallback(
+    async (turnKey: string | null): Promise<Blob | null> => {
+      const recorder = turnMediaRecorderRef.current;
+      const activeTurnKey = activeRecordingTurnKeyRef.current;
+      if (!recorder || !turnKey || activeTurnKey !== turnKey) {
+        return null;
+      }
+
+      const finalizeRecording = () => {
+        const audioBlob = buildBlobFromChunks(
+          turnRecordingChunksRef.current,
+          turnRecordingMimeTypeRef.current,
+        );
+        turnMediaRecorderRef.current = null;
+        activeRecordingTurnKeyRef.current = null;
+        turnRecordingChunksRef.current = [];
+        addLocalLog(
+          'Turn Recording Stopped',
+          `turn=${turnKey} | bytes=${audioBlob.size} | mime=${audioBlob.type || 'unknown'}`,
+        );
+        return audioBlob.size > 0 ? audioBlob : null;
+      };
+
+      if (recorder.state === 'inactive') {
+        return finalizeRecording();
+      }
+
+      return new Promise<Blob | null>((resolve) => {
+        const timeoutId = window.setTimeout(() => {
+          addLocalLog('Turn Recording Stop Timed Out', `turn=${turnKey}`);
+          resolve(finalizeRecording());
+        }, 2500);
+
+        recorder.onstop = () => {
+          window.clearTimeout(timeoutId);
+          resolve(finalizeRecording());
+        };
+        recorder.ondataavailable = (event) => {
+          if (event.data.size > 0) {
+            turnRecordingChunksRef.current.push(event.data);
+          }
+        };
+
+        try {
+          recorder.requestData();
+        } catch {
+          // Some browser implementations only emit data on stop.
+        }
+
+        try {
+          recorder.stop();
+        } catch (error) {
+          window.clearTimeout(timeoutId);
+          addLocalLog(
+            'Turn Recording Stop Failed',
+            error instanceof Error ? error.message : 'Unknown MediaRecorder stop error',
+          );
+          resolve(finalizeRecording());
+        }
+      });
+    },
+    [addLocalLog],
+  );
+
+  const submitRecordedTurnAudio = useCallback(
+    async (audioBlob: Blob): Promise<void> => {
+      const activeBackendBaseUrl = activeBackendBaseUrlRef.current;
+      const activeSessionId = sessionIdRef.current;
+      if (!activeBackendBaseUrl || !activeSessionId) {
+        throw new Error('Tap rehearsal session is not ready for recorded audio upload.');
+      }
+
+      const audioBase64 = await blobToBase64(audioBlob);
+      const response = await fetch(
+        `${activeBackendBaseUrl}/api/realtime-webrtc/sessions/${encodeURIComponent(
+          activeSessionId,
+        )}/live-memorization/audio-attempt`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            audioBase64,
+            mimeType: audioBlob.type || turnRecordingMimeTypeRef.current,
+          }),
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(await readResponseErrorMessage(response));
+      }
+
+      addLocalLog(
+        'Recorded User Line Uploaded',
+        `bytes=${audioBlob.size} | mime=${audioBlob.type || turnRecordingMimeTypeRef.current}`,
+      );
+    },
+    [addLocalLog],
+  );
+
   const openCurrentUserTurn = useCallback(() => {
     if (
       !canOpenTapUserTurn({
@@ -877,6 +1084,7 @@ export default function TapRehearsalPage() {
         )
       ) {
         lastOpenedTurnKeyRef.current = turnKey;
+        startTurnRecording(turnKey);
         setIsTurnReady(true);
       }
     } finally {
@@ -892,11 +1100,40 @@ export default function TapRehearsalPage() {
     isWaitingForCoachCue,
     sendRealtimeEvent,
     speechQueueLength,
+    startTurnRecording,
     status,
   ]);
 
-  const handleLineDone = useCallback(() => {
+  const handleLineDone = useCallback(async () => {
     if (!currentLine?.isUserLine || isLineDoneDisabled) {
+      return;
+    }
+
+    const turnKey = buildTapUserTurnKey(currentLine, correction);
+    committedLineNumberRef.current = currentLine.lineNumber;
+    setIsTurnReady(false);
+    setIsCommittingTurn(true);
+    setCorrection(null);
+
+    const recordedAudio = await stopTurnRecording(turnKey);
+    if (recordedAudio) {
+      try {
+        await submitRecordedTurnAudio(recordedAudio);
+        void fetchServerLogs();
+        void fetchTapRehearsalState();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown audio-upload error';
+        addLocalLog('Recorded User Line Upload Failed', message);
+        committedLineNumberRef.current = null;
+        lastOpenedTurnKeyRef.current = null;
+        setIsCommittingTurn(false);
+        setIsTurnReady(false);
+        toast({
+          title: 'Line was not sent',
+          description: message,
+          variant: 'destructive',
+        });
+      }
       return;
     }
 
@@ -908,6 +1145,9 @@ export default function TapRehearsalPage() {
     );
 
     if (!didCommit) {
+      committedLineNumberRef.current = null;
+      setIsCommittingTurn(false);
+      setIsTurnReady(true);
       toast({
         title: 'Line was not sent',
         description: 'The realtime connection is not ready. Try again after reconnecting.',
@@ -916,11 +1156,19 @@ export default function TapRehearsalPage() {
       return;
     }
 
-    committedLineNumberRef.current = currentLine.lineNumber;
-    setIsTurnReady(false);
-    setIsCommittingTurn(true);
-    setCorrection(null);
-  }, [currentLine, isLineDoneDisabled, sendRealtimeEvent, toast]);
+    addLocalLog('Realtime Buffer Commit Fallback', 'No local turn recording was available.');
+  }, [
+    addLocalLog,
+    correction,
+    currentLine,
+    fetchServerLogs,
+    fetchTapRehearsalState,
+    isLineDoneDisabled,
+    sendRealtimeEvent,
+    stopTurnRecording,
+    submitRecordedTurnAudio,
+    toast,
+  ]);
 
   const sendControlCommand = useCallback(
     async (command: 'skip' | 'repeat' | 'reveal') => {
@@ -966,6 +1214,16 @@ export default function TapRehearsalPage() {
           pendingCoachCueTurnKeyRef.current = null;
           completedCoachCueTurnKeyRef.current = null;
           didReceivePendingCoachSpeechRef.current = false;
+          try {
+            if (turnMediaRecorderRef.current?.state === 'recording') {
+              turnMediaRecorderRef.current.stop();
+            }
+          } catch {
+            // Discarding a stale recorder should not block skip.
+          }
+          turnMediaRecorderRef.current = null;
+          activeRecordingTurnKeyRef.current = null;
+          turnRecordingChunksRef.current = [];
         }
 
         addLocalLog('Control Command Sent', command);

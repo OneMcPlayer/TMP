@@ -290,6 +290,44 @@ async function setupTapRealtimeBackendMocks(page: Parameters<typeof setupRehears
       return;
     }
 
+    if (url.pathname.endsWith('/live-memorization/audio-attempt')) {
+      if (!committedWrongLine) {
+        committedWrongLine = true;
+        correctionTimestamp = '2026-04-25T10:00:01.000Z';
+        correction = {
+          accuracy: 0,
+          attempts: 1,
+          expectedText: 'Correct first line.',
+          lineNumber: 1,
+          spokenText: 'Wrong first line.',
+          timestamp: correctionTimestamp,
+        };
+        speech.push({
+          purpose: 'correction',
+          seq: nextSpeechSeq++,
+          text: 'Your line is: Correct first line.',
+          timestamp: correctionTimestamp,
+        });
+      }
+
+      await route.fulfill({
+        contentType: 'application/json',
+        headers: corsHeaders,
+        body: JSON.stringify({
+          callId: 'rtc_e2e',
+          correction,
+          currentLine,
+          ok: true,
+          sessionId: 'tap-e2e-session',
+          speech,
+          status: 'connected',
+          transcript: 'Wrong first line.',
+          turnCommitMode: 'manual',
+        }),
+      });
+      return;
+    }
+
     if (url.pathname.endsWith('/live-memorization/state')) {
       const afterSpeechSeq = Number.parseInt(url.searchParams.get('afterSpeechSeq') ?? '0', 10);
       await route.fulfill({
