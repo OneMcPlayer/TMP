@@ -1,0 +1,634 @@
+{
+  "title": "PROCESSO AL POTERE",
+  "language": "it",
+  "lines": [
+    {
+      "speaker": "SEGRETARIO1",
+      "line": "(in piedi, formale) Silenzio in aula. Si dichiara aperta la seduta."
+    },
+    {
+      "speaker": "SEGRETARIO2",
+      "line": "Che entri l'imparzialissimo giudice."
+    },
+    {
+      "speaker": "GIUDICE",
+      "line": "Questo non è un tribunale qualunque. Noi non giudichiamo un fatto, non giudichiamo una persona. Oggi noi... mettiamo sotto processo il potere."
+    },
+    {
+      "speaker": "SEGRETARIO1",
+      "line": "Si proceda con la lettura del capo d'accusa."
+    },
+    {
+      "speaker": "ACCUSA1",
+      "line": "Il potere è accusato di:"
+    },
+    {
+      "speaker": "CORO1",
+      "line": "aver schiacciato. aver manipolato. aver imposto silenzi. aver trasformato la paura in obbedienza."
+    },
+    {
+      "speaker": "DIFESA1",
+      "line": "Il potere è anche ciò che tiene insieme."
+    },
+    {
+      "speaker": "CORO2",
+      "line": "Ciò che organizza. Ciò che protegge."
+    },
+    {
+      "speaker": "DIFESA2",
+      "line": "Senza potere..."
+    },
+    {
+      "speaker": "CORO2",
+      "line": "chi decide? chi guida? chi si assume la responsabilità?"
+    },
+    {
+      "speaker": "GIUDICE",
+      "line": "Le posizioni sono chiare. Ma questo processo... non può esistere senza una giuria. (si rivolge al pubblico). Voi. Sì, voi. Siete qui non solo per guardare. Siete qui per giudicare, non le persone, ma le loro azioni."
+    },
+    {
+      "speaker": "SEGRETARIO2",
+      "line": "Data la natura del processo, fondamentali saranno le prove."
+    },
+    {
+      "speaker": "ACCUSA2",
+      "line": "Ogni parola... un indizio."
+    },
+    {
+      "speaker": "DIFESA1",
+      "line": "Ogni silenzio... un dubbio."
+    },
+    {
+      "speaker": "CORO1",
+      "line": "Guardate bene."
+    },
+    {
+      "speaker": "CORO2",
+      "line": "Ascoltate bene."
+    },
+    {
+      "speaker": "GIUDICE",
+      "line": "Non affrettiamo il nostro giudizio."
+    },
+    {
+      "speaker": "CORO",
+      "line": "Perché il potere... non si mostra mai per quello che è."
+    },
+    {
+      "speaker": "GIUDICE",
+      "line": "Cominciamo."
+    },
+    {
+      "speaker": "SEGRETARIO1",
+      "line": "Accusa, a voi la parola."
+    },
+    {
+      "speaker": "ACCUSA1",
+      "line": "Signor giudice. Signori e signore della giuria. La piramide del potere ha tanti strati, ma il primo è senz'altro il potere che ritroviamo nelle nostre stesse case. Il patriarcato."
+    },
+    {
+      "speaker": "ACCUSA2",
+      "line": "L'accusa si rifà al caso Molière del 1664 e chiama a testimoniare Orgone con la figlia Marianna e la domestica Dorina."
+    },
+    {
+      "speaker": "DIFESA2",
+      "line": "Signori era solo un padre di famiglia che voleva il meglio per la propria bambina. Chi di voi non vorrebbe/"
+    },
+    {
+      "speaker": "GIUDICE",
+      "line": "Lasciamo che a parlare siano i fatti."
+    },
+    {
+      "speaker": "SEGRETARIO2",
+      "line": "Prego, procedete con la prova."
+    },
+    {
+      "speaker": "ACCUSA1",
+      "line": "Signori e signore avete visto. Non ha voluto sentir ragioni."
+    },
+    {
+      "speaker": "CORO1",
+      "line": "Impone e non ascolta."
+    },
+    {
+      "speaker": "SEGRETARIO1",
+      "line": "Il vostro intervento è terminato."
+    },
+    {
+      "speaker": "DIFESA1",
+      "line": "Signor giudice posso rispondere?"
+    },
+    {
+      "speaker": "GIUDICE",
+      "line": "Parola alla difesa."
+    },
+    {
+      "speaker": "CORO2",
+      "line": "Ora tocca a noi."
+    },
+    {
+      "speaker": "DIFESA2",
+      "line": "Signori e signore della giuria, Messer Orgone ha agito per necessità."
+    },
+    {
+      "speaker": "ACCUSA2",
+      "line": "Non gliel'ha neanche chiesto!"
+    },
+    {
+      "speaker": "GIUDICE",
+      "line": "Ordine! È il momento della difesa."
+    },
+    {
+      "speaker": "DIFESA1",
+      "line": "Grazie signor giudice. Avete visto? Il potere è indispensabile per non permettere al caos di dilagare."
+    },
+    {
+      "speaker": "DIFESA2",
+      "line": "Chiamiamo a testimoniare Ben e Gus dal caso Calapranzi."
+    },
+    {
+      "speaker": "CORO2",
+      "line": "1957."
+    },
+    {
+      "speaker": "ACCUSA1",
+      "line": "Obiezione signor giudice, sono degli assassini."
+    },
+    {
+      "speaker": "GIUDICE",
+      "line": "Respinta. Ci interessano i fatti. Prima vediamo poi giudichiamo."
+    },
+    {
+      "speaker": "SEGRETARIO2",
+      "line": "Che inizi la prova Calapranzi."
+    },
+    {
+      "speaker": "ACCUSA2",
+      "line": "Ho il permesso di parlare?"
+    },
+    {
+      "speaker": "GIUDICE",
+      "line": "Concesso."
+    },
+    {
+      "speaker": "SEGRETARIO1",
+      "line": "La parola all'accusa."
+    },
+    {
+      "speaker": "ACCUSA1",
+      "line": "Il caso Calapranzi si porta dietro un'altra importante sentenza di quell'anno, la sentenza Pinter."
+    },
+    {
+      "speaker": "CORO1",
+      "line": "Il Compleanno,"
+    },
+    {
+      "speaker": "ACCUSA2",
+      "line": "appunto 1957."
+    },
+    {
+      "speaker": "DIFESA2",
+      "line": "Si era detto che quel caso/"
+    },
+    {
+      "speaker": "ACCUSA1",
+      "line": "Ecco vedete? Il potere si prende la libertà di sorvegliare, controllare e se decide che è il momento..."
+    },
+    {
+      "speaker": "CORO1",
+      "line": "Invade senza chiedere il permesso."
+    },
+    {
+      "speaker": "CORO2",
+      "line": "Ma"
+    },
+    {
+      "speaker": "DIFESA1",
+      "line": "Si era detto che quella prova/"
+    },
+    {
+      "speaker": "SEGRETARIO2",
+      "line": "Dopo farete valere le vostre ragioni."
+    },
+    {
+      "speaker": "GIUDICE",
+      "line": "Andate avanti."
+    },
+    {
+      "speaker": "ACCUSA2",
+      "line": "Grazie. L'accusa chiama quindi a testimoniare Goldberg."
+    },
+    {
+      "speaker": "CORO1",
+      "line": "Mr Goldberg."
+    },
+    {
+      "speaker": "ACCUSA2",
+      "line": "E MacCann."
+    },
+    {
+      "speaker": "CORO1",
+      "line": "Mr MacCann."
+    },
+    {
+      "speaker": "ACCUSA2",
+      "line": "dal caso Il Compleanno."
+    },
+    {
+      "speaker": "SEGRETARIO1",
+      "line": "Procedete con la prova."
+    },
+    {
+      "speaker": "GIUDICE",
+      "line": "Bene ora Difesa potete parlare."
+    },
+    {
+      "speaker": "DIFESA2",
+      "line": "Signor giudice, quello che volevo dire è che la prova che abbiamo appena visto è materiale anche della difesa."
+    },
+    {
+      "speaker": "ACCUSA1",
+      "line": "Come sarebbe a dire?"
+    },
+    {
+      "speaker": "CORO2",
+      "line": "Che la scena si ripete."
+    },
+    {
+      "speaker": "DIFESA1",
+      "line": "Ma con un accorgimento."
+    },
+    {
+      "speaker": "CORO2",
+      "line": "Cambiamo gli interpreti."
+    },
+    {
+      "speaker": "DIFESA2",
+      "line": "E vi dimostreremo che il potere, se ben esercitato, è rassicurante, protegge, non nuoce."
+    },
+    {
+      "speaker": "ACCUSA2",
+      "line": "Ma..."
+    },
+    {
+      "speaker": "CORO1",
+      "line": "Non possono farlo."
+    },
+    {
+      "speaker": "CORO2",
+      "line": "State a vedere."
+    },
+    {
+      "speaker": "GIUDICE",
+      "line": "Riguardiamo questa prova."
+    },
+    {
+      "speaker": "SEGRETARIO2",
+      "line": "Che entrino Goldberg e MacCann."
+    },
+    {
+      "speaker": "CORO2",
+      "line": "Mr Goldberg e Mr MacCann."
+    },
+    {
+      "speaker": "GIUDICE",
+      "line": "Ammetto che rivedere la scena è stato utile."
+    },
+    {
+      "speaker": "SEGRETARIO1",
+      "line": "Torna la parola all'accusa."
+    },
+    {
+      "speaker": "ACCUSA1",
+      "line": "Dato l'ambiente in cui ci troviamo, ci sembra opportuno chiamare in causa la legge."
+    },
+    {
+      "speaker": "CORO1",
+      "line": "Il caso Angelo contro Isabella 1603..."
+    },
+    {
+      "speaker": "ACCUSA1",
+      "line": "...presumibilmente"
+    },
+    {
+      "speaker": "SEGRETARIO2",
+      "line": "Intendete chiamare in causa un altro giudice?"
+    },
+    {
+      "speaker": "GIUDICE",
+      "line": "Lasciamoli fare, io sono l'imparzialissimo."
+    },
+    {
+      "speaker": "ACCUSA2",
+      "line": "Grazie signor giudice, siete davvero imparziale."
+    },
+    {
+      "speaker": "DIFESA1",
+      "line": "Il più imparziale."
+    },
+    {
+      "speaker": "CORI",
+      "line": "L'imparzialissimo in persona."
+    },
+    {
+      "speaker": "GIUDICE",
+      "line": "Va bene basta così, procediamo."
+    },
+    {
+      "speaker": "ACCUSA1",
+      "line": "Chiamiamo a testimoniare il giudice Angelo e suor Isabella, la prima delle nostre 'prove Shakespeare'."
+    },
+    {
+      "speaker": "CORO1",
+      "line": "Shakespeare."
+    },
+    {
+      "speaker": "ACCUSA2",
+      "line": "Per dimostrare che il potere non si può salvare se arriva ad usare la legge per i suoi scopi e abusare del proprio ruolo."
+    },
+    {
+      "speaker": "GIUDICE",
+      "line": "procediamo"
+    },
+    {
+      "speaker": "SEGRETARIO1",
+      "line": "Che entri la prova Shakespeare."
+    },
+    {
+      "speaker": "GIUDICE",
+      "line": "Cos'avete da dire voi della difesa?"
+    },
+    {
+      "speaker": "DIFESA2",
+      "line": "Le regole sono deboli, vacillano e il potere ne approfitta, ma se il sistema funziona..."
+    },
+    {
+      "speaker": "CORO2",
+      "line": "L'ordine è inevitabile."
+    },
+    {
+      "speaker": "DIFESA1",
+      "line": "Prendiamo ad esempio il caso \"A porte chiuse\"."
+    },
+    {
+      "speaker": "CORO2",
+      "line": "Francia, 1944."
+    },
+    {
+      "speaker": "DIFESA2",
+      "line": "Precisamente. Garcin e Ines."
+    },
+    {
+      "speaker": "ACCUSA1",
+      "line": "Altri assassini."
+    },
+    {
+      "speaker": "DIFESA1",
+      "line": "Infatti si trovano all'inferno."
+    },
+    {
+      "speaker": "GIUDICE",
+      "line": "Non mi sembra una buona scelta."
+    },
+    {
+      "speaker": "DIFESA2",
+      "line": "Signor giudice vi dimostreremo che con il giusto ordine impartito dall'alto, anche il più temibile degli assassini cambia atteggiamento."
+    },
+    {
+      "speaker": "DIFESA1",
+      "line": "Il vero potere non dubita delle sue stesse regole, nella prova rappresentate dal cameriere,"
+    },
+    {
+      "speaker": "GIUDICE",
+      "line": "Sarà..."
+    },
+    {
+      "speaker": "SEGRETARIO2",
+      "line": "Procediamo con la prova 'A porte chiuse'."
+    },
+    {
+      "speaker": "GIUDICE",
+      "line": "Diventa sempre più intricato."
+    },
+    {
+      "speaker": "SEGRETARIO1",
+      "line": "La parola all'accusa."
+    },
+    {
+      "speaker": "ACCUSA2",
+      "line": "La difesa parla di 'ordine impartito dall'alto', ma se nessuno è al di sopra di quel potere, basta nulla perché degeneri."
+    },
+    {
+      "speaker": "CORO1",
+      "line": "E la tirannia è servita."
+    },
+    {
+      "speaker": "DIFESA2",
+      "line": "Adesso non esageriamo."
+    },
+    {
+      "speaker": "ACCUSA1",
+      "line": "Non c'è bisogno di esagerare. Basta poco perché quel potere vacilli e diventi follia."
+    },
+    {
+      "speaker": "GIUDICE",
+      "line": "Sì, ma le prove."
+    },
+    {
+      "speaker": "CORO1",
+      "line": "Eccola qui la prova."
+    },
+    {
+      "speaker": "ACCUSA2",
+      "line": "Seconda prova Shakespeare. Il re Leonte di Sicilia e il suo consigliere Camillo."
+    },
+    {
+      "speaker": "ACCUSA1",
+      "line": "Un piccolo pensiero può trasformare un uomo in un dittatore."
+    },
+    {
+      "speaker": "SEGRETARIO2",
+      "line": "Che entrino i testimoni."
+    },
+    {
+      "speaker": "DIFESA1",
+      "line": "Signor giudice, signori e signore della giuria è chiaro che qui il problema è il troppo amore."
+    },
+    {
+      "speaker": "CORO1",
+      "line": "Eh?!"
+    },
+    {
+      "speaker": "DIFESA2",
+      "line": "Leonte era folle sì, ma d'amore."
+    },
+    {
+      "speaker": "GIUDICE",
+      "line": "Attenzione alle parole che usate."
+    },
+    {
+      "speaker": "DIFESA1",
+      "line": "Voglio dire che il potere può essere in mano a due persone contemporaneamente."
+    },
+    {
+      "speaker": "ACCUSA2",
+      "line": "Spiegati."
+    },
+    {
+      "speaker": "DIFESA2",
+      "line": "Quando due persone sono dipendenti l'una dall'altra, il potere è condiviso."
+    },
+    {
+      "speaker": "DIFESA1",
+      "line": "Chiamo a testimoniare Hamm e Clov."
+    },
+    {
+      "speaker": "CORO2",
+      "line": "Caso 'Finale di partita' 1955."
+    },
+    {
+      "speaker": "GIUDICE",
+      "line": "Il cieco paraplegico e il ragazzo con la gamba di legno giusto?"
+    },
+    {
+      "speaker": "DIFESA2",
+      "line": "Esatto."
+    },
+    {
+      "speaker": "SEGRETARIO1",
+      "line": "Procediamo con la visione della prova."
+    },
+    {
+      "speaker": "ACCUSA1",
+      "line": "E questo sarebbe un potere condiviso?"
+    },
+    {
+      "speaker": "ACCUSA2",
+      "line": "Un uomo che non può muoversi e uno che non riesce ad andarsene?"
+    },
+    {
+      "speaker": "CORO1",
+      "line": "È dipendenza."
+    },
+    {
+      "speaker": "CORO2",
+      "line": "È un legame."
+    },
+    {
+      "speaker": "ACCUSA1",
+      "line": "Ed è proprio lì che il potere diventa pericoloso."
+    },
+    {
+      "speaker": "SEGRETARIO2",
+      "line": "Non alludete, parlate chiaramente."
+    },
+    {
+      "speaker": "ACCUSA2",
+      "line": "Quando non si vede più"
+    },
+    {
+      "speaker": "ACCUSA1",
+      "line": "Quando si confonde con il bisogno"
+    },
+    {
+      "speaker": "ACCUSA2",
+      "line": "Quando si traveste da relazione"
+    },
+    {
+      "speaker": "ACCUSA1",
+      "line": "Quando non urla ma"
+    },
+    {
+      "speaker": "CORO1",
+      "line": "Seduce"
+    },
+    {
+      "speaker": "GIUDICE",
+      "line": "Parlate chiaramente."
+    },
+    {
+      "speaker": "ACCUSA2",
+      "line": "Caso Signorina Julie 1988."
+    },
+    {
+      "speaker": "CORO1",
+      "line": "Sentenza Strindberg."
+    },
+    {
+      "speaker": "ACCUSA1",
+      "line": "Il potere si insinua nei rapporti, inverte le gerarchie"
+    },
+    {
+      "speaker": "ACCUSA2",
+      "line": "anche quando non possono cambiare..."
+    },
+    {
+      "speaker": "CORO1",
+      "line": "seduce e distrugge."
+    },
+    {
+      "speaker": "SEGRETARIO2",
+      "line": "Mostrate la prova Strindberg."
+    },
+    {
+      "speaker": "GIUDICE",
+      "line": "Reperto interessante. Difesa?"
+    },
+    {
+      "speaker": "DIFESA1",
+      "line": "Non abbiamo altro da aggiungere."
+    },
+    {
+      "speaker": "GIUDICE",
+      "line": "Accusa?"
+    },
+    {
+      "speaker": "ACCUSA1",
+      "line": "Abbiamo finito le prove anche noi signor giudice."
+    },
+    {
+      "speaker": "SEGRETARIO2",
+      "line": "Silenzio in aula."
+    },
+    {
+      "speaker": "SEGRETARIO1",
+      "line": "Il giudice si prepara a deliberare."
+    },
+    {
+      "speaker": "GIUDICE",
+      "line": "E così l'imputato di questo processo, il Potere, passa in mano mia. Spetta a me decidere. Ma questo è un processo a teatro, e non avrete da me una sentenza chiara, ma forse è proprio questo il cuore di ciò che stiamo cercando."
+    },
+    {
+      "speaker": "GIUDICE",
+      "line": "(prende un libro/foglio e legge) Treccani: il Potere è la facoltà di fare o non fare qualcosa, di agire in un determinato modo, di compiere o meno una data azione."
+    },
+    {
+      "speaker": "GIUDICE",
+      "line": "Il potere è quindi libertà di azione, di decisione, di SCELTA. (indica ai segretari o al coro di iniziare a distribuire le M&M al pubblico)"
+    },
+    {
+      "speaker": "GIUDICE",
+      "line": "Scelte grandi e scelte piccole. Quale cioccolatino scegliere? Pillola rossa o pillola blu? Lo mangio adesso, o aspetto di uscire? Lo tengo per me, o lo regalo? Oppure scegliere di non prenderlo proprio, perché non mi va o non mi piace."
+    },
+    {
+      "speaker": "GIUDICE",
+      "line": "Ma cosa succede quando sono gli altri a scegliere per te? O quando si permette a qualcuno o qualcosa di scegliere al posto tuo?"
+    },
+    {
+      "speaker": "GIUDICE",
+      "line": "Ogni volta che non scegliamo, qualcun altro lo farà al posto nostro. E già questa, in sé, è una sentenza."
+    },
+    {
+      "speaker": "GIUDICE",
+      "line": "La corte non emette verdetto."
+    },
+    {
+      "speaker": "CORO1",
+      "line": "Cara giuria"
+    },
+    {
+      "speaker": "CORO2",
+      "line": "Potete ritirarvi per deliberare (buio)"
+    }
+  ]
+}

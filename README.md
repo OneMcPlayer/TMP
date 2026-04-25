@@ -16,6 +16,7 @@ A browser-only rehearsal page for **Finale di partita** by Samuel Beckett. It is
 - A separate **Realtime Browser Lab** route for testing a true browser-call architecture with a local backend
 - A separate **Tap Rehearsal** route for backend-managed rehearsal with hidden user lines and one large line-complete button
 - Automatic client debug-log upload for backend-assisted realtime sessions, so server logs include browser-side events
+- A selectable rehearsal text list, including the original **Finale di partita** text and **Processo al Potere**
 
 ## Car Mode Note
 
@@ -26,7 +27,7 @@ On browsers that expose the Screen Wake Lock API, car mode also tries to keep th
 
 ## Script Format
 
-The app supports either legacy `character`/`text` lines or `speaker`/`line` lines. The bundled script is already configured for **Finale di partita** in `client/public/script.json`.
+The app supports either legacy `character`/`text` lines or `speaker`/`line` lines. The bundled default script is configured for **Finale di partita** in `client/public/script.json`, and additional selectable texts live under `client/public/scripts/`.
 
 Example:
 

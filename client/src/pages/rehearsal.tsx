@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import { ApiKeyInput } from '@/components/api-key-input';
 import { CharacterSelector } from '@/components/character-selector';
+import { ScriptSelector } from '@/components/script-selector';
 import { DeviceSetupScreen } from '@/components/device-setup-screen';
 import { CarModeStage } from '@/components/car-mode-stage';
 import { RehearsalTimeline } from '@/components/rehearsal-timeline';
@@ -58,6 +59,12 @@ import { shouldIgnoreDuplicateMediaControlAction } from '@/lib/media-control-gua
 import { isSuspiciouslySmallRecordingBlob } from '@/lib/recording-quality';
 import { cn } from '@/lib/utils';
 import { buildAppRouteHref } from '@/lib/app-route';
+import {
+  DEFAULT_SCRIPT_ID,
+  SCRIPT_OPTIONS,
+  fetchRawScript,
+  getScriptOptionById,
+} from '@/lib/script-catalog';
 import { AlertCircle, CarFront, Copy, Download, RefreshCw, Settings, Smartphone, Theater } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -99,6 +106,7 @@ function isPlaybackPermissionError(error: unknown): boolean {
 }
 
 interface PracticePreferences {
+  selectedScriptId: string;
   selectedCharacter: string | null;
   carMode: boolean;
   autoPlayAudio: boolean;
@@ -164,6 +172,7 @@ function setMediaSessionMetadata({
 
 function loadPreferences(): PracticePreferences {
   const defaultPreferences: PracticePreferences = {
+    selectedScriptId: DEFAULT_SCRIPT_ID,
     selectedCharacter: null,
     carMode: false,
     autoPlayAudio: true,
@@ -177,13 +186,14 @@ function loadPreferences(): PracticePreferences {
     }
 
     const parsedPreferences = JSON.parse(rawPreferences) as Partial<PracticePreferences>;
-      return {
-        selectedCharacter: parsedPreferences.selectedCharacter ?? defaultPreferences.selectedCharacter,
-        carMode: parsedPreferences.carMode ?? defaultPreferences.carMode,
-        autoPlayAudio: parsedPreferences.autoPlayAudio ?? defaultPreferences.autoPlayAudio,
-        autoSpeakCorrections:
-          parsedPreferences.autoSpeakCorrections ?? defaultPreferences.autoSpeakCorrections,
-      };
+    return {
+      selectedScriptId: getScriptOptionById(parsedPreferences.selectedScriptId).id,
+      selectedCharacter: parsedPreferences.selectedCharacter ?? defaultPreferences.selectedCharacter,
+      carMode: parsedPreferences.carMode ?? defaultPreferences.carMode,
+      autoPlayAudio: parsedPreferences.autoPlayAudio ?? defaultPreferences.autoPlayAudio,
+      autoSpeakCorrections:
+        parsedPreferences.autoSpeakCorrections ?? defaultPreferences.autoSpeakCorrections,
+    };
   } catch {
     return defaultPreferences;
   }
@@ -216,6 +226,9 @@ export default function RehearsalPage() {
   });
 
   const [script, setScript] = useState<Script | null>(null);
+  const [selectedScriptId, setSelectedScriptId] = useState(
+    initialPreferences.current.selectedScriptId,
+  );
   const [loadError, setLoadError] = useState<string | null>(null);
   const [hasApiKey, setHasApiKey] = useState(!!getApiKey());
   const [selectedCharacter, setSelectedCharacter] = useState<string | null>(
@@ -335,6 +348,7 @@ export default function RehearsalPage() {
   const showPreparationRecoveryAction = shouldOfferPreparationRecovery(slowPreparationSeconds * 1000);
   const shouldKeepScreenAwake = carMode && hasStarted && !isComplete;
   const shouldShowLaunchScreen = !hasStarted;
+  const selectedScriptOption = getScriptOptionById(selectedScriptId);
   const preferredAudioSessionType = resolvePreferredAudioSessionType({
     carMode,
     hasCompletedDeviceSetup,
@@ -480,12 +494,13 @@ export default function RehearsalPage() {
       PREFERENCES_STORAGE_KEY,
       JSON.stringify({
         selectedCharacter,
+        selectedScriptId,
         carMode,
         autoPlayAudio,
         autoSpeakCorrections,
       } satisfies PracticePreferences),
     );
-  }, [selectedCharacter, carMode, autoPlayAudio, autoSpeakCorrections]);
+  }, [selectedCharacter, selectedScriptId, carMode, autoPlayAudio, autoSpeakCorrections]);
 
   useEffect(() => {
     const previousCarMode = lastSelectedModeRef.current;
@@ -510,16 +525,25 @@ export default function RehearsalPage() {
   }, [carMode, hasStarted, showSetup]);
 
   useEffect(() => {
+    let isCancelled = false;
+
     async function loadScript() {
       try {
-        const response = await fetch(`${import.meta.env.BASE_URL}script.json`);
-        if (!response.ok) {
-          throw new Error('Failed to load script');
+        setLoadError(null);
+        setScript(null);
+
+        const rawData: RawScript = await fetchRawScript(selectedScriptOption);
+        if (isCancelled) {
+          return;
         }
-        const rawData: RawScript = await response.json();
+
         setScript(normalizeScript(rawData));
-        addDebugLog('Script Loaded', 'Loaded script.json successfully');
+        addDebugLog('Script Loaded', `Loaded ${selectedScriptOption.path} successfully`);
       } catch (err) {
+        if (isCancelled) {
+          return;
+        }
+
         setLoadError(err instanceof Error ? err.message : 'Failed to load script');
         addDebugLog(
           'Script Load Error',
@@ -529,7 +553,11 @@ export default function RehearsalPage() {
     }
 
     void loadScript();
-  }, [addDebugLog]);
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [addDebugLog, selectedScriptOption]);
 
   useEffect(() => {
     if (!script) {
@@ -1909,12 +1937,20 @@ export default function RehearsalPage() {
             apiKeySection={<ApiKeyInput onKeyChange={setHasApiKey} />}
             autoPlayAudio={autoPlayAudio}
             characterSection={
-              <CharacterSelector
-                characters={characters}
-                selectedCharacter={selectedCharacter}
-                onSelect={setSelectedCharacter}
-                disabled={false}
-              />
+              <>
+                <ScriptSelector
+                  options={SCRIPT_OPTIONS}
+                  selectedScriptId={selectedScriptOption.id}
+                  onSelect={setSelectedScriptId}
+                  disabled={hasStarted && !isComplete}
+                />
+                <CharacterSelector
+                  characters={characters}
+                  selectedCharacter={selectedCharacter}
+                  onSelect={setSelectedCharacter}
+                  disabled={false}
+                />
+              </>
             }
             autoSpeakCorrections={autoSpeakCorrections}
             canStart={canStartRehearsal}
@@ -1955,8 +1991,14 @@ export default function RehearsalPage() {
 
         {showSetup && (!hasStarted || !carMode) && (
           <div className="p-4 space-y-4">
-            <div className="grid gap-4 md:grid-cols-3">
+            <div className="grid gap-4 md:grid-cols-2">
               <ApiKeyInput onKeyChange={setHasApiKey} />
+              <ScriptSelector
+                options={SCRIPT_OPTIONS}
+                selectedScriptId={selectedScriptOption.id}
+                onSelect={setSelectedScriptId}
+                disabled={hasStarted && !isComplete}
+              />
               <CharacterSelector
                 characters={characters}
                 selectedCharacter={selectedCharacter}

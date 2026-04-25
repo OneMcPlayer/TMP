@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { CharacterSelector } from '@/components/character-selector';
+import { ScriptSelector } from '@/components/script-selector';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -20,8 +21,14 @@ import {
 } from '@/lib/realtime-client-logs';
 import { REALTIME_CALL_LAB_BACKEND_STORAGE_KEY, normalizeRealtimeCallLabBackendUrl, serializeRealtimeServerLogs, summarizeRealtimeEvent, type RealtimeServerLogEntry } from '@/lib/realtime-call-lab';
 import { normalizeScript } from '@/lib/script-utils';
+import {
+  DEFAULT_SCRIPT_ID,
+  SCRIPT_OPTIONS,
+  fetchRawScript,
+  getScriptOptionById,
+} from '@/lib/script-catalog';
 import { buildTapUserTurnKey, canOpenTapUserTurn, shouldResolveTapCommittedLine, shouldStartTapCoachCueGate } from '@/lib/tap-rehearsal-turn';
-import type { RawScript, Script } from '@/lib/types';
+import type { Script } from '@/lib/types';
 import { APP_VERSION } from '@/lib/version';
 import { AlertCircle, ArrowLeft, Check, Download, Loader2, Mic, Server, SkipForward, Square, Theater, Wifi } from 'lucide-react';
 
@@ -278,6 +285,24 @@ function loadPreferredCharacter(): string | null {
   }
 }
 
+function loadPreferredScriptId(): string {
+  if (typeof window === 'undefined') {
+    return DEFAULT_SCRIPT_ID;
+  }
+
+  try {
+    const rawPreferences = localStorage.getItem(REHEARSAL_PREFERENCES_STORAGE_KEY);
+    if (!rawPreferences) {
+      return DEFAULT_SCRIPT_ID;
+    }
+
+    const parsedPreferences = JSON.parse(rawPreferences) as { selectedScriptId?: unknown };
+    return getScriptOptionById(parsedPreferences.selectedScriptId).id;
+  } catch {
+    return DEFAULT_SCRIPT_ID;
+  }
+}
+
 function persistPreferredCharacter(selectedCharacter: string | null): void {
   if (typeof window === 'undefined') {
     return;
@@ -293,6 +318,28 @@ function persistPreferredCharacter(selectedCharacter: string | null): void {
       JSON.stringify({
         ...parsedPreferences,
         selectedCharacter,
+      }),
+    );
+  } catch {
+    // Preference persistence is best-effort only.
+  }
+}
+
+function persistPreferredScriptId(selectedScriptId: string): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    const rawPreferences = localStorage.getItem(REHEARSAL_PREFERENCES_STORAGE_KEY);
+    const parsedPreferences =
+      rawPreferences ? (JSON.parse(rawPreferences) as Record<string, unknown>) : {};
+
+    localStorage.setItem(
+      REHEARSAL_PREFERENCES_STORAGE_KEY,
+      JSON.stringify({
+        ...parsedPreferences,
+        selectedScriptId,
       }),
     );
   } catch {
@@ -374,6 +421,7 @@ export default function TapRehearsalPage() {
     return localStorage.getItem(REALTIME_CALL_LAB_BACKEND_STORAGE_KEY) ?? '';
   });
   const [script, setScript] = useState<Script | null>(null);
+  const [selectedScriptId, setSelectedScriptId] = useState(() => loadPreferredScriptId());
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedCharacter, setSelectedCharacter] = useState<string | null>(() =>
     loadPreferredCharacter(),
@@ -450,6 +498,7 @@ export default function TapRehearsalPage() {
     () => (script ? Array.from(new Set(script.lines.map((line) => line.character))) : []),
     [script],
   );
+  const selectedScriptOption = getScriptOptionById(selectedScriptId);
   const clampedStartLineNumber = useMemo(
     () => clampLiveMemorizationStartLine(startLineNumber, script?.lines.length ?? 0),
     [script?.lines.length, startLineNumber],
@@ -1712,6 +1761,10 @@ export default function TapRehearsalPage() {
   }, [selectedCharacter]);
 
   useEffect(() => {
+    persistPreferredScriptId(selectedScriptOption.id);
+  }, [selectedScriptOption.id]);
+
+  useEffect(() => {
     if (!script) {
       return;
     }
@@ -1730,17 +1783,25 @@ export default function TapRehearsalPage() {
   }, [script, selectedCharacter]);
 
   useEffect(() => {
+    let isCancelled = false;
+
     async function loadScript() {
       try {
-        const response = await fetch(`${import.meta.env.BASE_URL}script.json`);
-        if (!response.ok) {
-          throw new Error('Failed to load script');
+        setLoadError(null);
+        setScript(null);
+
+        const rawData = await fetchRawScript(selectedScriptOption);
+        if (isCancelled) {
+          return;
         }
 
-        const rawData = (await response.json()) as RawScript;
         setScript(normalizeScript(rawData));
-        addLocalLog('Script Loaded', 'Loaded script.json successfully');
+        addLocalLog('Script Loaded', `Loaded ${selectedScriptOption.path} successfully`);
       } catch (error) {
+        if (isCancelled) {
+          return;
+        }
+
         const message = error instanceof Error ? error.message : 'Failed to load script';
         setLoadError(message);
         addLocalLog('Script Load Error', message);
@@ -1748,7 +1809,11 @@ export default function TapRehearsalPage() {
     }
 
     void loadScript();
-  }, [addLocalLog]);
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [addLocalLog, selectedScriptOption]);
 
   useEffect(() => {
     openCurrentUserTurn();
@@ -1862,6 +1927,14 @@ export default function TapRehearsalPage() {
                     onChange={(event) => setBackendUrlInput(event.target.value)}
                   />
                 </div>
+
+                <ScriptSelector
+                  options={SCRIPT_OPTIONS}
+                  selectedScriptId={selectedScriptOption.id}
+                  onSelect={setSelectedScriptId}
+                  disabled={isBusyStarting || status === 'stopping'}
+                  variant="field"
+                />
 
                 <CharacterSelector
                   characters={characters}
