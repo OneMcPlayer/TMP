@@ -53,10 +53,10 @@ export function ApiKeyInput({ onKeyChange }: ApiKeyInputProps) {
       <CardHeader className="pb-3">
         <CardTitle className="text-lg flex items-center gap-2">
           <Key className="w-5 h-5 text-primary" />
-          OpenAI API Key
+          OpenRouter API Key
         </CardTitle>
         <CardDescription>
-          Stored only in this browser so the static GitHub Pages app can call OpenAI directly
+          Stored only in this browser so the static GitHub Pages app can call OpenRouter directly
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -67,7 +67,7 @@ export function ApiKeyInput({ onKeyChange }: ApiKeyInputProps) {
               type={showKey ? 'text' : 'password'}
               value={key}
               onChange={(e) => handleKeyChange(e.target.value)}
-              placeholder="sk-..."
+              placeholder="sk-or-v1-..."
               className="border-0 pr-2 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
             />
             <Button

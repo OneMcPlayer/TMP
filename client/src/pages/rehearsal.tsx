@@ -975,7 +975,7 @@ export default function RehearsalPage() {
       toast({
         variant: 'destructive',
         title: 'API Key Required',
-        description: 'Please enter your OpenAI API key to start rehearsing',
+        description: 'Please enter your OpenRouter API key to start rehearsing',
       });
       return;
     }

@@ -119,7 +119,7 @@ beforeEach(() => {
     configurable: true,
     value: createCacheStorageMock(),
   });
-  localStorage.setItem('openai_api_key', 'test-key');
+  localStorage.setItem('openrouter_api_key', 'test-key');
 });
 
 afterEach(() => {
@@ -132,6 +132,64 @@ afterEach(() => {
   Object.defineProperty(globalThis, 'caches', {
     configurable: true,
     value: originalCaches,
+  });
+});
+
+test('textToSpeech sends OpenRouter speech requests with OpenRouter auth and model', async () => {
+  let capturedRequest: RequestInfo | URL | null = null;
+  let capturedInit: RequestInit | undefined;
+
+  globalThis.fetch = (async (request, init) => {
+    capturedRequest = request;
+    capturedInit = init;
+    return new Response(new Blob(['openrouter-audio']), { status: 200 });
+  }) as typeof fetch;
+
+  const audio = await textToSpeech('ciao', { voice: 'alloy' });
+
+  assert.equal(String(capturedRequest), 'https://openrouter.ai/api/v1/audio/speech');
+  const headers = new Headers(capturedInit?.headers);
+  assert.equal(headers.get('Authorization'), 'Bearer test-key');
+  assert.equal(headers.get('Content-Type'), 'application/json');
+  assert.equal(headers.get('X-OpenRouter-Title'), 'Finale di partita Rehearsal Partner');
+
+  const body = JSON.parse(String(capturedInit?.body));
+  assert.deepEqual(body, {
+    model: 'openai/tts-1',
+    input: 'ciao',
+    voice: 'alloy',
+    response_format: 'mp3',
+  });
+  assert.equal(await audio.text(), 'openrouter-audio');
+});
+
+test('speechToText sends OpenRouter transcription requests as base64 JSON', async () => {
+  let capturedRequest: RequestInfo | URL | null = null;
+  let capturedInit: RequestInit | undefined;
+
+  globalThis.fetch = (async (request, init) => {
+    capturedRequest = request;
+    capturedInit = init;
+    return new Response(JSON.stringify({ text: 'hello world' }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  }) as typeof fetch;
+
+  const result = await speechToText(new Blob(['voice-data'], { type: 'audio/webm;codecs=opus' }));
+
+  assert.equal(result, 'hello world');
+  assert.equal(String(capturedRequest), 'https://openrouter.ai/api/v1/audio/transcriptions');
+  const headers = new Headers(capturedInit?.headers);
+  assert.equal(headers.get('Authorization'), 'Bearer test-key');
+  assert.equal(headers.get('Content-Type'), 'application/json');
+  assert.equal(headers.get('X-OpenRouter-Title'), 'Finale di partita Rehearsal Partner');
+
+  const body = JSON.parse(String(capturedInit?.body));
+  assert.equal(body.model, 'openai/whisper-large-v3');
+  assert.deepEqual(body.input_audio, {
+    data: Buffer.from('voice-data').toString('base64'),
+    format: 'webm',
   });
 });
 
