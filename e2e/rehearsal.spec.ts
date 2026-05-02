@@ -627,7 +627,7 @@ test.describe('rehearsal browser e2e', () => {
       .toBe(audioPlayCallsAfterSetup);
   });
 
-  test('records and scores a user line with mocked browser media and OpenAI responses', async ({
+  test('records and scores a user line with mocked browser media and OpenRouter responses', async ({
     page,
   }) => {
     await setupRehearsalApp(page, {

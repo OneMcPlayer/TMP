@@ -87,7 +87,7 @@ export async function setupRehearsalApp(
       selectedCharacter: initSelectedCharacter,
       wakeLockSupported: initWakeLockSupported,
     }) => {
-      localStorage.setItem('openai_api_key', initApiKey);
+      localStorage.setItem('openrouter_api_key', initApiKey);
       localStorage.setItem(
         'rehearsal_preferences',
         JSON.stringify({
@@ -408,14 +408,14 @@ export async function setupRehearsalApp(
     });
   });
 
-  await page.route('https://api.openai.com/v1/audio/speech', async (route) => {
+  await page.route('https://openrouter.ai/api/v1/audio/speech', async (route) => {
     await route.fulfill({
       contentType: 'audio/mpeg',
       body: 'playwright-fake-audio',
     });
   });
 
-  await page.route('https://api.openai.com/v1/audio/transcriptions', async (route) => {
+  await page.route('https://openrouter.ai/api/v1/audio/transcriptions', async (route) => {
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({ text: transcriptionText }),

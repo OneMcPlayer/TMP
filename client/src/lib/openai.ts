@@ -1,8 +1,10 @@
 import { buildTtsCacheKey, getCachedTtsBlob, setCachedTtsBlob, __resetTtsCacheStateForTests } from './tts-cache';
 
-const API_KEY_STORAGE_KEY = 'openai_api_key';
-const TTS_MODEL = 'tts-1';
-const STT_MODEL = 'gpt-4o-transcribe';
+const API_KEY_STORAGE_KEY = 'openrouter_api_key';
+const OPENROUTER_API_BASE_URL = 'https://openrouter.ai/api/v1';
+const OPENROUTER_APP_TITLE = 'Finale di partita Rehearsal Partner';
+const TTS_MODEL = 'google/gemini-3.1-flash-tts-preview';
+const STT_MODEL = 'openai/whisper-large-v3';
 const TTS_RESPONSE_FORMAT = 'mp3';
 const API_REQUEST_TIMEOUT_MS = 15_000;
 const MAX_API_RETRY_ATTEMPTS = 1;
@@ -97,6 +99,7 @@ interface TextToSpeechOptions {
 }
 
 interface SpeechToTextOptions {
+  language?: string;
   prompt?: string;
 }
 
@@ -119,6 +122,48 @@ export function getAudioUploadFilename(audioBlob: Blob): string {
     default:
       return 'recording.webm';
   }
+}
+
+function getAudioUploadFormat(audioBlob: Blob): string {
+  return getAudioUploadFilename(audioBlob).split('.').pop() ?? 'webm';
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  const chunkSize = 0x8000;
+
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    const chunk = bytes.subarray(offset, offset + chunkSize);
+    binary += String.fromCharCode(...Array.from(chunk));
+  }
+
+  return btoa(binary);
+}
+
+async function blobToBase64(audioBlob: Blob): Promise<string> {
+  return arrayBufferToBase64(await audioBlob.arrayBuffer());
+}
+
+function buildOpenRouterHeaders(apiKey: string, contentType: string = 'application/json'): HeadersInit {
+  return {
+    'Authorization': `Bearer ${apiKey}`,
+    'Content-Type': contentType,
+    'X-OpenRouter-Title': OPENROUTER_APP_TITLE,
+  };
+}
+
+function buildOpenRouterUrl(path: string): string {
+  return `${OPENROUTER_API_BASE_URL}${path}`;
+}
+
+function normalizeLanguageCode(language: string | undefined): string | null {
+  const normalized = language?.trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+
+  return /^[a-z]{2}$/.test(normalized) ? normalized : null;
 }
 
 function isRetryableStatus(status: number): boolean {
@@ -219,16 +264,13 @@ export async function textToSpeech(
 
   const apiKey = getApiKey();
   if (!apiKey) {
-    throw new Error('OpenAI API key not configured');
+    throw new Error('OpenRouter API key not configured');
   }
 
   const requestPromise = (async () => {
-    const response = await fetchWithRetry('https://api.openai.com/v1/audio/speech', {
+    const response = await fetchWithRetry(buildOpenRouterUrl('/audio/speech'), {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
+      headers: buildOpenRouterHeaders(apiKey),
       body: JSON.stringify({
         model: TTS_MODEL,
         input: text,
@@ -274,22 +316,23 @@ export async function speechToText(
 ): Promise<string> {
   const apiKey = getApiKey();
   if (!apiKey) {
-    throw new Error('OpenAI API key not configured');
+    throw new Error('OpenRouter API key not configured');
   }
 
-  const formData = new FormData();
-  formData.append('file', audioBlob, getAudioUploadFilename(audioBlob));
-  formData.append('model', STT_MODEL);
-  if (options.prompt) {
-    formData.append('prompt', options.prompt);
-  }
-
-  const response = await fetchWithRetry('https://api.openai.com/v1/audio/transcriptions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
+  const language = normalizeLanguageCode(options.language);
+  const requestBody = {
+    model: STT_MODEL,
+    input_audio: {
+      data: await blobToBase64(audioBlob),
+      format: getAudioUploadFormat(audioBlob),
     },
-    body: formData,
+    ...(language ? { language } : {}),
+  };
+
+  const response = await fetchWithRetry(buildOpenRouterUrl('/audio/transcriptions'), {
+    method: 'POST',
+    headers: buildOpenRouterHeaders(apiKey),
+    body: JSON.stringify(requestBody),
   });
 
   if (!response.ok) {

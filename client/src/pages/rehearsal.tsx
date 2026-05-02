@@ -975,7 +975,7 @@ export default function RehearsalPage() {
       toast({
         variant: 'destructive',
         title: 'API Key Required',
-        description: 'Please enter your OpenAI API key to start rehearsing',
+        description: 'Please enter your OpenRouter API key to start rehearsing',
       });
       return;
     }
@@ -1402,6 +1402,7 @@ export default function RehearsalPage() {
 
       const expectedText = getSpeakableText(currentLine.text);
       const transcription = await speechToText(audioBlob, {
+        language: script.language,
         prompt: buildTranscriptionPrompt(script, selectedCharacter, expectedText),
       });
       const diff = computeWordDiff(expectedText, transcription);

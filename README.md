@@ -5,8 +5,8 @@ A browser-only rehearsal page for **Finale di partita** by Samuel Beckett. It is
 ## Features
 
 - Memory-style rehearsal with your own lines hidden until it is your turn
-- OpenAI text-to-speech for the other character's lines
-- OpenAI speech-to-text for your spoken lines
+- OpenRouter text-to-speech for the other character's lines
+- OpenRouter speech-to-text for your spoken lines
 - Correction rules that ignore punctuation and anything inside parentheses
 - Optional spoken correction playback when your line is wrong
 - Larger-control **car mode** for quick phone use
@@ -133,7 +133,7 @@ The workflow will build the app and deploy `dist/` to GitHub Pages automatically
 
 ## Personal Use Notes
 
-- Your OpenAI API key is stored only in `localStorage` on the device you use.
+- Your OpenRouter API key is stored only in `localStorage` on the device you use.
 - There is no backend server in this setup.
 - Spoken correction mode is especially useful when you do not want to watch the screen.
 
