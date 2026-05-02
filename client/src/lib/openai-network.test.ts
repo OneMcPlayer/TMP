@@ -138,14 +138,18 @@ afterEach(() => {
 test('textToSpeech sends OpenRouter speech requests with OpenRouter auth and model', async () => {
   let capturedRequest: RequestInfo | URL | null = null;
   let capturedInit: RequestInit | undefined;
+  const pcmBytes = new Uint8Array([1, 0, 2, 0]);
 
   globalThis.fetch = (async (request, init) => {
     capturedRequest = request;
     capturedInit = init;
-    return new Response(new Blob(['openrouter-audio']), { status: 200 });
+    return new Response(pcmBytes, {
+      status: 200,
+      headers: { 'content-type': 'audio/L16; rate=24000; channels=1' },
+    });
   }) as typeof fetch;
 
-  const audio = await textToSpeech('ciao', { voice: 'alloy' });
+  const audio = await textToSpeech('ciao', { voice: 'Puck' });
 
   assert.equal(String(capturedRequest), 'https://openrouter.ai/api/v1/audio/speech');
   const headers = new Headers(capturedInit?.headers);
@@ -157,10 +161,19 @@ test('textToSpeech sends OpenRouter speech requests with OpenRouter auth and mod
   assert.deepEqual(body, {
     model: 'google/gemini-3.1-flash-tts-preview',
     input: 'ciao',
-    voice: 'alloy',
-    response_format: 'mp3',
+    voice: 'Puck',
+    response_format: 'pcm',
   });
-  assert.equal(await audio.text(), 'openrouter-audio');
+  assert.equal(audio.type, 'audio/wav');
+
+  const wavBuffer = await audio.arrayBuffer();
+  const wavBytes = new Uint8Array(wavBuffer);
+  const wavView = new DataView(wavBuffer);
+
+  assert.equal(Buffer.from(wavBytes.slice(0, 4)).toString('ascii'), 'RIFF');
+  assert.equal(Buffer.from(wavBytes.slice(8, 12)).toString('ascii'), 'WAVE');
+  assert.equal(wavView.getUint32(24, true), 24_000);
+  assert.deepEqual(Array.from(wavBytes.slice(44)), Array.from(pcmBytes));
 });
 
 test('speechToText sends OpenRouter transcription requests as base64 JSON', async () => {
@@ -238,8 +251,8 @@ test('textToSpeech deduplicates in-flight requests for the same text and voice',
   }) as typeof fetch;
 
   const [firstAudio, secondAudio] = await Promise.all([
-    textToSpeech('same line', { voice: 'fable' }),
-    textToSpeech('same line', { voice: 'fable' }),
+    textToSpeech('same line', { voice: 'Puck' }),
+    textToSpeech('same line', { voice: 'Puck' }),
   ]);
 
   assert.equal(calls, 1);

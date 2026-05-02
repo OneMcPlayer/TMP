@@ -80,14 +80,14 @@ const LOOKAHEAD_AUDIO_PREFETCH_COUNT = 3;
 const CAR_MODE_MEDIA_CONTROL_DEBOUNCE_MS = 900;
 
 const VOICE_MAP: Record<string, string> = {
-  'CLOV': 'fable',
-  'HAMM': 'onyx',
-  'NAGG': 'echo',
-  'NELL': 'shimmer',
+  'CLOV': 'Puck',
+  'HAMM': 'Charon',
+  'NAGG': 'Iapetus',
+  'NELL': 'Kore',
 };
 
 function getVoiceForCharacter(character: string): string {
-  return VOICE_MAP[character.toUpperCase()] || 'alloy';
+  return VOICE_MAP[character.toUpperCase()] || 'Zephyr';
 }
 
 function isPlaybackPermissionError(error: unknown): boolean {

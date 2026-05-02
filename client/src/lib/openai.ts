@@ -5,7 +5,12 @@ const OPENROUTER_API_BASE_URL = 'https://openrouter.ai/api/v1';
 const OPENROUTER_APP_TITLE = 'Finale di partita Rehearsal Partner';
 const TTS_MODEL = 'google/gemini-3.1-flash-tts-preview';
 const STT_MODEL = 'openai/whisper-large-v3';
-const TTS_RESPONSE_FORMAT = 'mp3';
+const DEFAULT_TTS_VOICE = 'Zephyr';
+const TTS_RESPONSE_FORMAT = 'pcm';
+const TTS_PCM_SAMPLE_RATE = 24_000;
+const TTS_PCM_CHANNEL_COUNT = 1;
+const TTS_PCM_BITS_PER_SAMPLE = 16;
+const WAV_HEADER_BYTE_LENGTH = 44;
 const API_REQUEST_TIMEOUT_MS = 15_000;
 const MAX_API_RETRY_ATTEMPTS = 1;
 const PLAYBACK_PRIMING_TIMEOUT_MS = 1_500;
@@ -107,6 +112,12 @@ interface PlayAudioBlobOptions {
   signal?: AbortSignal;
 }
 
+interface PcmAudioFormat {
+  bitsPerSample: number;
+  channelCount: number;
+  sampleRate: number;
+}
+
 export function getAudioUploadFilename(audioBlob: Blob): string {
   const mimeType = audioBlob.type.split(';', 1)[0];
 
@@ -157,6 +168,10 @@ function buildOpenRouterUrl(path: string): string {
   return `${OPENROUTER_API_BASE_URL}${path}`;
 }
 
+function getTextToSpeechVoice(options: TextToSpeechOptions): string {
+  return options.voice?.trim() || DEFAULT_TTS_VOICE;
+}
+
 function normalizeLanguageCode(language: string | undefined): string | null {
   const normalized = language?.trim().toLowerCase();
   if (!normalized) {
@@ -164,6 +179,105 @@ function normalizeLanguageCode(language: string | undefined): string | null {
   }
 
   return /^[a-z]{2}$/.test(normalized) ? normalized : null;
+}
+
+function parsePositiveInteger(value: string | undefined): number | null {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function parsePcmAudioFormat(contentType: string | null): PcmAudioFormat {
+  const format: PcmAudioFormat = {
+    bitsPerSample: TTS_PCM_BITS_PER_SAMPLE,
+    channelCount: TTS_PCM_CHANNEL_COUNT,
+    sampleRate: TTS_PCM_SAMPLE_RATE,
+  };
+
+  if (!contentType) {
+    return format;
+  }
+
+  const parameters = new Map<string, string>();
+  for (const part of contentType.split(';').slice(1)) {
+    const [rawKey, rawValue] = part.split('=');
+    const key = rawKey?.trim().toLowerCase();
+    const value = rawValue?.trim();
+    if (key && value) {
+      parameters.set(key, value);
+    }
+  }
+
+  return {
+    bitsPerSample:
+      parsePositiveInteger(parameters.get('bits')) ??
+      parsePositiveInteger(parameters.get('bit-depth')) ??
+      format.bitsPerSample,
+    channelCount:
+      parsePositiveInteger(parameters.get('channels')) ??
+      parsePositiveInteger(parameters.get('channel-count')) ??
+      format.channelCount,
+    sampleRate:
+      parsePositiveInteger(parameters.get('rate')) ??
+      parsePositiveInteger(parameters.get('sample-rate')) ??
+      parsePositiveInteger(parameters.get('samplerate')) ??
+      format.sampleRate,
+  };
+}
+
+function isPcmContentType(contentType: string | null): boolean {
+  if (!contentType) {
+    return false;
+  }
+
+  const mimeType = contentType.split(';', 1)[0]?.trim().toLowerCase();
+  return mimeType === 'audio/l16' || mimeType === 'audio/pcm';
+}
+
+function writeAscii(dataView: DataView, offset: number, value: string): void {
+  for (let index = 0; index < value.length; index += 1) {
+    dataView.setUint8(offset + index, value.charCodeAt(index));
+  }
+}
+
+function buildWavHeader(pcmByteLength: number, format: PcmAudioFormat): ArrayBuffer {
+  const header = new ArrayBuffer(WAV_HEADER_BYTE_LENGTH);
+  const view = new DataView(header);
+  const bytesPerSample = format.bitsPerSample / 8;
+  const blockAlign = format.channelCount * bytesPerSample;
+  const byteRate = format.sampleRate * blockAlign;
+
+  writeAscii(view, 0, 'RIFF');
+  view.setUint32(4, 36 + pcmByteLength, true);
+  writeAscii(view, 8, 'WAVE');
+  writeAscii(view, 12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, format.channelCount, true);
+  view.setUint32(24, format.sampleRate, true);
+  view.setUint32(28, byteRate, true);
+  view.setUint16(32, blockAlign, true);
+  view.setUint16(34, format.bitsPerSample, true);
+  writeAscii(view, 36, 'data');
+  view.setUint32(40, pcmByteLength, true);
+
+  return header;
+}
+
+async function buildPlayableTtsBlob(response: Response): Promise<Blob> {
+  const audioBlob = await response.blob();
+  const contentType = response.headers.get('Content-Type') || audioBlob.type;
+
+  if (TTS_RESPONSE_FORMAT !== 'pcm' || !isPcmContentType(contentType)) {
+    return audioBlob;
+  }
+
+  const pcmBuffer = await audioBlob.arrayBuffer();
+  const wavHeader = buildWavHeader(pcmBuffer.byteLength, parsePcmAudioFormat(contentType));
+  return new Blob([wavHeader, pcmBuffer], { type: 'audio/wav' });
 }
 
 function isRetryableStatus(status: number): boolean {
@@ -241,9 +355,10 @@ export async function textToSpeech(
   text: string,
   options: TextToSpeechOptions = {},
 ): Promise<Blob> {
+  const voice = getTextToSpeechVoice(options);
   const cacheKey = buildTtsCacheKey({
     text,
-    voice: options.voice ?? 'alloy',
+    voice,
     model: TTS_MODEL,
     responseFormat: TTS_RESPONSE_FORMAT,
   });
@@ -274,7 +389,7 @@ export async function textToSpeech(
       body: JSON.stringify({
         model: TTS_MODEL,
         input: text,
-        voice: options.voice ?? 'alloy',
+        voice,
         response_format: TTS_RESPONSE_FORMAT,
       }),
     });
@@ -284,7 +399,7 @@ export async function textToSpeech(
       throw new Error(error.error?.message || `TTS failed: ${response.status}`);
     }
 
-    const audioBlob = await response.blob();
+    const audioBlob = await buildPlayableTtsBlob(response);
     await setCachedTtsBlob(cacheKey, audioBlob);
     return audioBlob;
   })();
