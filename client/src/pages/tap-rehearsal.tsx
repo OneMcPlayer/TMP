@@ -22,6 +22,11 @@ import {
 import { REALTIME_CALL_LAB_BACKEND_STORAGE_KEY, normalizeRealtimeCallLabBackendUrl, serializeRealtimeServerLogs, summarizeRealtimeEvent, type RealtimeServerLogEntry } from '@/lib/realtime-call-lab';
 import { normalizeScript } from '@/lib/script-utils';
 import {
+  captureLocalDiagnostic,
+  recordLocalDiagnosticBreadcrumb,
+  setLocalDiagnosticContext,
+} from '@/lib/local-diagnostics';
+import {
   DEFAULT_SCRIPT_ID,
   SCRIPT_OPTIONS,
   fetchRawScript,
@@ -509,7 +514,28 @@ export default function TapRehearsalPage() {
   const reportSessionId = sessionId ?? lastSessionId;
   const reportCallId = callId ?? lastCallId;
 
+  useEffect(() => {
+    setLocalDiagnosticContext({
+      backendBaseUrl: activeBackendBaseUrlRef.current ?? normalizedBackendUrl,
+      callId: reportCallId,
+      character: selectedCharacter,
+      currentLineNumber: currentLine?.lineNumber ?? null,
+      mode: 'tap-rehearsal',
+      route: 'tap-rehearsal',
+      sessionId: reportSessionId,
+      status,
+    });
+  }, [
+    currentLine?.lineNumber,
+    normalizedBackendUrl,
+    reportCallId,
+    reportSessionId,
+    selectedCharacter,
+    status,
+  ]);
+
   const addLocalLog = useCallback((event: string, details?: string) => {
+    recordLocalDiagnosticBreadcrumb(event, details);
     setLocalLogs((entries) => appendDebugLogEntry(entries, createDebugLogEntry(event, details)));
   }, []);
 
@@ -639,6 +665,14 @@ export default function TapRehearsalPage() {
           );
         } catch (error) {
           if (!(error instanceof Error && error.name === 'AbortError')) {
+            captureLocalDiagnostic({
+              error,
+              extras: {
+                purpose: speechEvent.purpose,
+                seq: speechEvent.seq,
+              },
+              type: 'Coach Audio Failed',
+            });
             addLocalLog(
               'Coach Audio Failed',
               `seq=${speechEvent.seq} | ${
@@ -1255,6 +1289,14 @@ export default function TapRehearsalPage() {
         void fetchTapRehearsalState();
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown audio-upload error';
+        captureLocalDiagnostic({
+          error,
+          extras: {
+            lineNumber: currentLine.lineNumber,
+            turnKey: turnKey ?? 'unknown',
+          },
+          type: 'Recorded User Line Upload Failed',
+        });
         addLocalLog('Recorded User Line Upload Failed', message);
         committedLineNumberRef.current = null;
         lastOpenedTurnKeyRef.current = null;
@@ -1395,6 +1437,13 @@ export default function TapRehearsalPage() {
         void fetchTapRehearsalState();
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown control-command error';
+        captureLocalDiagnostic({
+          error,
+          extras: {
+            command,
+          },
+          type: 'Control Command Failed',
+        });
         addLocalLog('Control Command Failed', `${command} | ${message}`);
         toast({
           title: 'Control failed',
@@ -1452,6 +1501,10 @@ export default function TapRehearsalPage() {
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown backend health error';
+      captureLocalDiagnostic({
+        error,
+        type: 'Backend Health Check Failed',
+      });
       setStatus('error');
       setErrorMessage(message);
       addLocalLog('Backend Health Check Failed', message);
@@ -1650,6 +1703,14 @@ export default function TapRehearsalPage() {
       setStatus('connected');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown tap-rehearsal error';
+      captureLocalDiagnostic({
+        error,
+        extras: {
+          character: selectedCharacter,
+          startLineNumber: clampedStartLineNumber,
+        },
+        type: 'Tap Rehearsal Failed',
+      });
       setStatus('error');
       setErrorMessage(message);
       addLocalLog('Tap Rehearsal Failed', message);

@@ -82,6 +82,20 @@ If the page no longer shows the session ID after cleanup, open `/api/realtime-we
 The local backend also writes session logs to `output/realtime-session-logs.jsonl` for direct server-side inspection.
 Pre-session browser logs are written there too once a backend URL is configured, so failed start attempts do not require copying the client report.
 
+## Local Diagnostics
+
+No external error service is required. Backend-assisted pages install a local browser diagnostic collector that sends crash/error snapshots to the realtime backend when a backend URL is configured.
+
+Captured snapshots include app version, route, session ID, call ID, tap state, browser/runtime info, and recent debug breadcrumbs. Audio is never sent, and transcript/script-like fields are redacted before they are written.
+
+Useful backend endpoints:
+
+- `GET /api/realtime-webrtc/diagnostics`
+- `POST /api/realtime-webrtc/diagnostics`
+- `POST /api/realtime-webrtc/sessions/:sessionId/diagnostics`
+
+Diagnostics are also appended to `output/realtime-session-logs.jsonl`, so they can be inspected directly on the server next to the normal session logs.
+
 ## Quality Checks
 
 Run the full local validation suite (typecheck + unit tests + scenario tests + real browser e2e + production build):

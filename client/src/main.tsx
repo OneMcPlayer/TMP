@@ -1,12 +1,14 @@
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./index.css";
+import { LocalDiagnosticErrorBoundary } from "./components/local-diagnostic-error-boundary";
 import { APP_VERSION } from "./lib/version";
 import {
   capturePwaRuntimeDiagnostics,
   getCurrentPwaDisplayMode,
   queuePwaDebugLog,
 } from "./lib/pwa-debug";
+import { initializeLocalDiagnostics } from "./lib/local-diagnostics";
 
 function describeServiceWorkerRegistration(
   registration: ServiceWorkerRegistration,
@@ -109,6 +111,7 @@ function initializePwaDebugLogging(): void {
   });
 }
 
+initializeLocalDiagnostics();
 initializePwaDebugLogging();
 
 if (import.meta.env.PROD && "serviceWorker" in navigator) {
@@ -169,4 +172,8 @@ if (import.meta.env.PROD && "serviceWorker" in navigator) {
   queuePwaDebugLog("Service Worker Registration Skipped", "Development mode");
 }
 
-createRoot(document.getElementById("root")!).render(<App />);
+createRoot(document.getElementById("root")!).render(
+  <LocalDiagnosticErrorBoundary>
+    <App />
+  </LocalDiagnosticErrorBoundary>,
+);

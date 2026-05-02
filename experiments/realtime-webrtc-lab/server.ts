@@ -23,6 +23,12 @@ import {
   type RawScript,
   type Script,
 } from '../../shared/rehearsal-core';
+import {
+  buildClientDiagnosticRecord,
+  summarizeClientDiagnosticRecord,
+  type ClientDiagnosticPayload,
+  type ClientDiagnosticRecord,
+} from './local-diagnostics';
 
 type SessionLogLevel = 'error' | 'info';
 
@@ -139,6 +145,8 @@ type ClientLogsBody = {
   source?: unknown;
 };
 
+type ClientDiagnosticsBody = ClientDiagnosticPayload;
+
 type PublicSessionSummary = {
   callId: string | null;
   createdAt: string;
@@ -165,12 +173,14 @@ const LIVE_MEMORIZATION_TTS_RESPONSE_FORMAT = 'mp3';
 const MAX_SPEECH_EVENTS_PER_SESSION = 200;
 const MAX_CLIENT_LOG_BATCH_SIZE = 50;
 const MAX_CLIENT_LOG_TEXT_LENGTH = 1200;
+const MAX_CLIENT_DIAGNOSTICS = 200;
 const REALTIME_SESSION_LOG_FILE =
   process.env.REALTIME_SESSION_LOG_FILE ??
   path.resolve(process.cwd(), 'output', 'realtime-session-logs.jsonl');
 
 const app = express();
 const sessions = new Map<string, RealtimeLabSession>();
+const recentClientDiagnostics: ClientDiagnosticRecord[] = [];
 
 app.use(express.json({ limit: '25mb' }));
 app.use((req, res, next) => {
@@ -339,6 +349,39 @@ async function persistDiagnosticClientLogEntries(
   }
 
   return acceptedCount;
+}
+
+async function persistClientDiagnosticRecord(
+  session: RealtimeLabSession | null,
+  diagnostic: ClientDiagnosticRecord,
+): Promise<void> {
+  recentClientDiagnostics.push(diagnostic);
+  if (recentClientDiagnostics.length > MAX_CLIENT_DIAGNOSTICS) {
+    recentClientDiagnostics.splice(0, recentClientDiagnostics.length - MAX_CLIENT_DIAGNOSTICS);
+  }
+
+  if (session) {
+    appendSessionLog(
+      session,
+      diagnostic.severity === 'error' ? 'error' : 'info',
+      'Client Diagnostic Captured',
+      summarizeClientDiagnosticRecord(diagnostic),
+    );
+  }
+
+  await appendPersistentLogRecord({
+    sessionId: session?.id ?? null,
+    callId: session?.callId ?? null,
+    createdAt: session ? formatTimestamp(new Date(session.createdAt)) : diagnostic.receivedAt,
+    diagnostic,
+    mode: session?.mode ?? 'client-diagnostic',
+    model: session?.model ?? null,
+    status: session?.status ?? 'client-diagnostic',
+    voice: session?.voice ?? null,
+    ...(session && isLiveMemorizationSession(session)
+      ? { selectedCharacter: session.liveMemorization.selectedCharacter }
+      : {}),
+  });
 }
 
 function summarizeRealtimeEvent(payload: unknown): string {
@@ -1227,6 +1270,7 @@ async function connectSidebandSocket(
 app.get('/health', (_req, res) => {
   res.json({
     ok: true,
+    clientDiagnostics: recentClientDiagnostics.length,
     logFile: REALTIME_SESSION_LOG_FILE,
     openAiConfigured: Boolean(OPENAI_API_KEY),
     uptimeSeconds: Math.round(process.uptime()),
@@ -1248,6 +1292,31 @@ app.get('/api/realtime-webrtc/sessions', (req, res) => {
     generatedAt: formatTimestamp(),
     logFile: REALTIME_SESSION_LOG_FILE,
     sessions: recentSessions,
+  });
+});
+
+app.get('/api/realtime-webrtc/diagnostics', (req, res) => {
+  const requestedLimit = Number.parseInt(String(req.query.limit ?? '20'), 10);
+  const limit = Number.isFinite(requestedLimit)
+    ? Math.max(1, Math.min(requestedLimit, MAX_CLIENT_DIAGNOSTICS))
+    : 20;
+
+  res.json({
+    count: Math.min(limit, recentClientDiagnostics.length),
+    diagnostics: recentClientDiagnostics.slice(-limit).reverse(),
+    generatedAt: formatTimestamp(),
+    logFile: REALTIME_SESSION_LOG_FILE,
+  });
+});
+
+app.post('/api/realtime-webrtc/diagnostics', async (req, res) => {
+  const diagnostic = buildClientDiagnosticRecord((req.body ?? {}) as ClientDiagnosticsBody);
+  await persistClientDiagnosticRecord(null, diagnostic);
+  res.json({
+    accepted: true,
+    diagnostic: summarizeClientDiagnosticRecord(diagnostic),
+    logFile: REALTIME_SESSION_LOG_FILE,
+    ok: true,
   });
 });
 
@@ -1716,9 +1785,7 @@ app.get(
         session,
         'error',
         'Speech Audio Failed',
-        `seq=${speechEvent.seq} | ${
-          error instanceof Error ? error.message : 'Unknown speech-audio error'
-        }`,
+        `seq=${speechEvent.seq} | ${error instanceof Error ? error.message : 'Unknown speech-audio error'}`,
       );
       res.status(502).json({
         error: error instanceof Error ? error.message : 'Unknown speech-audio error',
@@ -1770,6 +1837,26 @@ app.post('/api/realtime-webrtc/sessions/:sessionId/client-logs', (req, res) => {
   const accepted = appendClientLogEntries(session, String(source || 'browser'), entries);
   res.json({
     accepted,
+    ok: true,
+    sessionId: session.id,
+    status: session.status,
+  });
+});
+
+app.post('/api/realtime-webrtc/sessions/:sessionId/diagnostics', async (req, res) => {
+  const session = sessions.get(req.params.sessionId);
+  if (!session) {
+    res.status(404).json({
+      error: 'Realtime experiment session not found.',
+    });
+    return;
+  }
+
+  const diagnostic = buildClientDiagnosticRecord((req.body ?? {}) as ClientDiagnosticsBody);
+  await persistClientDiagnosticRecord(session, diagnostic);
+  res.json({
+    accepted: true,
+    diagnostic: summarizeClientDiagnosticRecord(diagnostic),
     ok: true,
     sessionId: session.id,
     status: session.status,

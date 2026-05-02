@@ -11,6 +11,7 @@ This is a separate local backend for testing whether a true browser `WebRTC` ses
 - logs sideband events, errors, and session updates
 - accepts browser-side client debug logs for active sessions
 - exposes those logs back to the browser page for export
+- accepts local browser crash/error diagnostics and persists them with the session logs
 
 ## Environment
 
@@ -84,6 +85,17 @@ Override that location with `REALTIME_SESSION_LOG_FILE=/path/to/file.jsonl` when
 
 That makes a backend log export useful without manually copying the client report after every run.
 Pre-session logs use the sessionless endpoint so backend URL checks, microphone setup, and failed starts can still be inspected from the server-side JSONL file.
+
+## Local Diagnostics
+
+The browser installs a local crash/error collector. Once a backend URL is configured, uncaught errors, unhandled promise rejections, and tap-route failures are posted to the backend with app state, browser state, and recent debug breadcrumbs.
+
+Useful local endpoints:
+
+- `/api/realtime-webrtc/diagnostics`
+- `/api/realtime-webrtc/sessions/:sessionId/diagnostics`
+
+Diagnostics are also persisted into `output/realtime-session-logs.jsonl`. The payload is sanitized before writing: audio is never sent, and transcript/script-like fields are redacted.
 
 ## Why this exists
 
