@@ -1,3 +1,16 @@
+# Archive Notice
+
+  This repository is archived and kept only as a historical experiment/reference.
+
+  It was used to test the static, browser-only rehearsal flow for **Finale di partita**, especially autoplay, recording, car-mode behavior, mobile Safari reliability, Realtime/WebRTC experiments, tap
+  rehearsal, and diagnostic logging.
+
+  The active development has moved to the newer **Memorize Tool** backend/VPS version, which merges the useful TMP lessons into a maintained architecture with an API backend, server-side TTS/STT proxying,
+  diagnostics, access control, staging/production deployment, and the expanded theatrical script library.
+
+  This TMP version is no longer the recommended app to deploy or share. It remains useful for understanding previous experiments and design decisions, but new fixes and production work should happen in the
+  current `Memorize-Tool` `dev` branch.
+  
 # Finale di partita Rehearsal Partner
 
 A browser-only rehearsal page for **Finale di partita** by Samuel Beckett. It is built as a static Vite app and is ready to publish on **GitHub Pages**.
